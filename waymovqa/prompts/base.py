@@ -1,46 +1,60 @@
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Any, Type
+from typing import Dict, Any, List, Union, Type, TypeVar, Generic, Optional
+
+from waymovqa.data import FrameInfo, ObjectInfo, SceneInfo
+from waymovqa.eval.answer import BaseAnswer
+
+# Update BasePromptGenerator with typing information
+T = TypeVar('T', bound=BaseAnswer)
 
 # Registry to store all prompt generators
 PROMPT_REGISTRY = {}
+
 
 def register_prompt_generator(cls):
     """Decorator to register a prompt generator class in the registry."""
     PROMPT_REGISTRY[cls.__name__] = cls
     return cls
 
-class BasePromptGenerator(ABC):
-    """
-    Abstract base class for all prompt generators.
-    Defines the interface that all prompt generators must implement.
-    """
-    
+def get_prompt_generator(name: str):
+    """Get prompt generator by name."""
+    if name not in PROMPT_REGISTRY:
+        raise ValueError(f"Prompt generator '{name}' not found")
+    return PROMPT_REGISTRY[name]
+
+def get_all_prompt_generators():
+    """Get all registered prompt generators."""
+    return PROMPT_REGISTRY
+
+
+class BasePromptGenerator(Generic[T], ABC):
+    """Base class for all prompt generators with typed answers."""
+
     @abstractmethod
-    def is_applicable(self, scene_data: Dict[str, Any]) -> bool:
-        """
-        Check if this prompt generator can be applied to the given scene.
-        
-        Args:
-            scene_data: Dictionary containing scene metadata and object information
-            
-        Returns:
-            bool: True if this prompt generator can be applied, False otherwise
-        """
+    def is_applicable(
+        self, scene: SceneInfo, objects: List[ObjectInfo], frame: FrameInfo = None
+    ) -> bool:
+        """Check if this generator can be applied to the given scene."""
+        pass
+
+    @abstractmethod
+    def generate(
+        self, scene: SceneInfo, objects: List[ObjectInfo], frame: FrameInfo = None
+    ) -> List[Dict[str, Any]]:
+        """Generate VQA samples from scene, objects, and optionally a specific frame."""
         pass
     
     @abstractmethod
-    def generate_questions(self, scene_data: Dict[str, Any], n_questions: int = 1) -> List[Dict[str, Any]]:
-        """
-        Generate VQA questions for the given scene.
-        
-        Args:
-            scene_data: Dictionary containing scene metadata and object information
-            n_questions: Number of questions to generate
-            
-        Returns:
-            List of dictionaries, each containing:
-                - question: str, the generated question
-                - answer: str, the answer to the question
-                - metadata: dict, additional metadata about the Q&A pair
-        """
+    def get_metric_class(self) -> str:
+        """Return the name of the metric class to use for evaluation."""
+        pass
+    
+    @abstractmethod
+    def get_answer_type(self) -> Type[T]:
+        """Return the answer type class used by this generator."""
+        pass
+    
+    @abstractmethod
+    def parse_answer(self, answer_text: str) -> T:
+        """Parse a textual answer into the structured format."""
         pass

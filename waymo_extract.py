@@ -1,5 +1,6 @@
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
 import tensorflow as tf
 import numpy as np
@@ -28,8 +29,15 @@ import pprint
 
     Original function returns dict of arrays, we want to save the LiDAR and images to disk rather than returning.
 """
-def convert_frame_to_dict(tfrecord_path, frame, paths_dict: Dict[str, Path],
-                         objectid_to_label: Dict, objectid_to_color: Dict) -> Dict[str, Any]:
+
+
+def convert_frame_to_dict(
+    tfrecord_path,
+    frame,
+    paths_dict: Dict[str, Path],
+    objectid_to_label: Dict,
+    objectid_to_color: Dict,
+) -> Dict[str, Any]:
     """Convert the frame proto into a dict of numpy arrays and save data to disk.
 
     Arguments:
@@ -76,11 +84,14 @@ def convert_frame_to_dict(tfrecord_path, frame, paths_dict: Dict[str, Path],
 
     # Add basic scene and frame info
     scene_info["scene_id"] = scene_id
-    scene_info['tfrecord_name'] = tfrecord_name
+    scene_info["tfrecord_name"] = tfrecord_name
 
     # Add basic frame information
     frame_info["scene_id"] = scene_id
     frame_info["timestamp"] = timestamp
+    frame_info["time_of_day"] = frame.context.stats.time_of_day
+    frame_info["weather"] = frame.context.stats.time_of_day
+    frame_info["location"] = frame.context.stats.location
     frame_info["pose"] = np.reshape(
         np.array(frame.pose.transform, np.float32), (4, 4)
     ).tolist()
@@ -132,7 +143,7 @@ def convert_frame_to_dict(tfrecord_path, frame, paths_dict: Dict[str, Path],
     # Save camera images and their metadata in frame_info
     frame_info["images"] = []
     visible_cameras = {}  # Track which cameras each object is visible in
-    
+
     for im in frame.images:
         cam_name_str = open_dataset.CameraName.Name.Name(im.name)
 
@@ -231,11 +242,11 @@ def convert_frame_to_dict(tfrecord_path, frame, paths_dict: Dict[str, Path],
     objects_without_cvat = []
     objects_with_color = []
     objects_without_color = []
-    
+
     # Save objects and their metadata
     frame_info["objects"] = []
     frame_object_table = []  # Table for just this frame's objects
-    
+
     for label in frame.laser_labels:
         object_id = label.id
 
@@ -243,13 +254,13 @@ def convert_frame_to_dict(tfrecord_path, frame, paths_dict: Dict[str, Path],
         in_cvat = object_id in objectid_to_label
         cvat_label = objectid_to_label.get(object_id, None)
         cvat_color = objectid_to_color.get(object_id, None)
-        
+
         # Track objects for filtered lists
         if in_cvat:
             objects_with_cvat.append(object_id)
         else:
             objects_without_cvat.append(object_id)
-            
+
         if cvat_color is not None:
             objects_with_color.append(object_id)
         else:
@@ -257,7 +268,10 @@ def convert_frame_to_dict(tfrecord_path, frame, paths_dict: Dict[str, Path],
 
         # Determine visible cameras for this object
         visible_cameras_for_obj = []
-        if hasattr(label, "most_visible_camera_name") and label.most_visible_camera_name:
+        if (
+            hasattr(label, "most_visible_camera_name")
+            and label.most_visible_camera_name
+        ):
             visible_cameras_for_obj.append(label.most_visible_camera_name)
 
         obj_info = {
@@ -320,46 +334,51 @@ def convert_frame_to_dict(tfrecord_path, frame, paths_dict: Dict[str, Path],
                 obj_info["metadata"]["speed_z"] = float(label.metadata.speed_z)
             if hasattr(label.metadata, "accel_z"):
                 obj_info["metadata"]["accel_z"] = float(label.metadata.accel_z)
-        
+
         # Add to frame's object table
-        frame_object_table.append({
-            "id": object_id,
-            "scene_id": scene_id,
-            "timestamp": timestamp,
-            "type": label_pb2.Label.Type.Name(label.type),
-            "in_cvat": in_cvat,
-            "cvat_label": cvat_label,
-            "has_color": cvat_color is not None,
-            "num_lidar_points": int(label.num_lidar_points_in_box),
-            "most_visible_camera": getattr(label, "most_visible_camera_name", None)
-        })
-        
+        frame_object_table.append(
+            {
+                "id": object_id,
+                "scene_id": scene_id,
+                "timestamp": timestamp,
+                "type": label_pb2.Label.Type.Name(label.type),
+                "in_cvat": in_cvat,
+                "cvat_label": cvat_label,
+                "has_color": cvat_color is not None,
+                "cvat_color": cvat_color,
+                "num_lidar_points": int(label.num_lidar_points_in_box),
+                "most_visible_camera": getattr(label, "most_visible_camera_name", None),
+            }
+        )
+
         # Check if the object file already exists (from previous frames)
         object_path_pattern = f"object_{object_id}_*.json"
         existing_files = list(paths_dict["object_infos"].glob(object_path_pattern))
-        
+
         if existing_files:
             # Load the existing object info and update it
             existing_file = existing_files[0]
             with open(existing_file, "r") as f:
                 existing_obj_info = json.load(f)
-            
+
             # Update frames list
             if timestamp not in existing_obj_info["frames"]:
                 existing_obj_info["frames"].append(timestamp)
-                
+
             # Update visible cameras list
             for cam in visible_cameras_for_obj:
                 if cam not in existing_obj_info["visible_cameras"]:
                     existing_obj_info["visible_cameras"].append(cam)
-            
+
             # Keep the existing file but update its contents
             obj_path = existing_file
             with open(obj_path, "w") as f:
                 json.dump(existing_obj_info, f, indent=2)
         else:
             # Create a new file with scene ID and timestamp in the name
-            obj_path = paths_dict["object_infos"] / f"object_{object_id}_{scene_id}.json"
+            obj_path = (
+                paths_dict["object_infos"] / f"object_{object_id}_{scene_id}.json"
+            )
             with open(obj_path, "w") as f:
                 json.dump(obj_info, f, indent=2)
 
@@ -375,111 +394,131 @@ def convert_frame_to_dict(tfrecord_path, frame, paths_dict: Dict[str, Path],
 
     # Create object_lists directory if it doesn't exist
     paths_dict["object_lists"].mkdir(exist_ok=True)
-    
+
     # Save timestamp-specific filtered object lists to txt files
-    cvat_objects_path = paths_dict["object_lists"] / f"{scene_id}_{timestamp}_cvat_objects.txt"
+    cvat_objects_path = (
+        paths_dict["object_lists"] / f"{scene_id}_{timestamp}_cvat_objects.txt"
+    )
     with open(cvat_objects_path, "w") as f:
         for obj_id in objects_with_cvat:
             f.write(f"{obj_id}\n")
     saved_files["object_lists"].append(str(cvat_objects_path))
-    
-    non_cvat_objects_path = paths_dict["object_lists"] / f"{scene_id}_{timestamp}_non_cvat_objects.txt"
+
+    non_cvat_objects_path = (
+        paths_dict["object_lists"] / f"{scene_id}_{timestamp}_non_cvat_objects.txt"
+    )
     with open(non_cvat_objects_path, "w") as f:
         for obj_id in objects_without_cvat:
             f.write(f"{obj_id}\n")
     saved_files["object_lists"].append(str(non_cvat_objects_path))
-    
-    color_objects_path = paths_dict["object_lists"] / f"{scene_id}_{timestamp}_color_objects.txt"
+
+    color_objects_path = (
+        paths_dict["object_lists"] / f"{scene_id}_{timestamp}_color_objects.txt"
+    )
     with open(color_objects_path, "w") as f:
         for obj_id in objects_with_color:
             f.write(f"{obj_id}\n")
     saved_files["object_lists"].append(str(color_objects_path))
-    
-    no_color_objects_path = paths_dict["object_lists"] / f"{scene_id}_{timestamp}_no_color_objects.txt"
+
+    no_color_objects_path = (
+        paths_dict["object_lists"] / f"{scene_id}_{timestamp}_no_color_objects.txt"
+    )
     with open(no_color_objects_path, "w") as f:
         for obj_id in objects_without_color:
             f.write(f"{obj_id}\n")
     saved_files["object_lists"].append(str(no_color_objects_path))
-    
+
     # Create a timestamp-specific summary table with basic object info for quick filtering
-    object_table_path = paths_dict["object_lists"] / f"{scene_id}_{timestamp}_object_table.json"
+    object_table_path = (
+        paths_dict["object_lists"] / f"{scene_id}_{timestamp}_object_table.json"
+    )
     with open(object_table_path, "w") as f:
         json.dump(frame_object_table, f, indent=2)
     saved_files["object_lists"].append(str(object_table_path))
-    
+
     # Also create/update scene-level lists that aggregate all objects seen in this scene
     # These files track all objects seen in the scene across all frames processed so far
-    
+
     # First, check if scene-level lists already exist and read them
-    scene_cvat_objects_path = paths_dict["object_lists"] / f"{scene_id}_all_cvat_objects.txt"
+    scene_cvat_objects_path = (
+        paths_dict["object_lists"] / f"{scene_id}_all_cvat_objects.txt"
+    )
     scene_cvat_objects = set()
     if scene_cvat_objects_path.exists():
         with open(scene_cvat_objects_path, "r") as f:
             scene_cvat_objects = set(line.strip() for line in f if line.strip())
-    
+
     # Add new objects from this frame
     scene_cvat_objects.update(objects_with_cvat)
-    
+
     # Write back the updated list
     with open(scene_cvat_objects_path, "w") as f:
         for obj_id in sorted(scene_cvat_objects):
             f.write(f"{obj_id}\n")
-    
+
     if not scene_cvat_objects_path in saved_files["object_lists"]:
         saved_files["object_lists"].append(str(scene_cvat_objects_path))
-    
+
     # Same for non-CVAT objects
-    scene_non_cvat_objects_path = paths_dict["object_lists"] / f"{scene_id}_all_non_cvat_objects.txt"
+    scene_non_cvat_objects_path = (
+        paths_dict["object_lists"] / f"{scene_id}_all_non_cvat_objects.txt"
+    )
     scene_non_cvat_objects = set()
     if scene_non_cvat_objects_path.exists():
         with open(scene_non_cvat_objects_path, "r") as f:
             scene_non_cvat_objects = set(line.strip() for line in f if line.strip())
-    
+
     scene_non_cvat_objects.update(objects_without_cvat)
-    
+
     with open(scene_non_cvat_objects_path, "w") as f:
         for obj_id in sorted(scene_non_cvat_objects):
             f.write(f"{obj_id}\n")
-    
+
     if not scene_non_cvat_objects_path in saved_files["object_lists"]:
         saved_files["object_lists"].append(str(scene_non_cvat_objects_path))
-    
+
     # Same for color objects
-    scene_color_objects_path = paths_dict["object_lists"] / f"{scene_id}_all_color_objects.txt"
+    scene_color_objects_path = (
+        paths_dict["object_lists"] / f"{scene_id}_all_color_objects.txt"
+    )
     scene_color_objects = set()
     if scene_color_objects_path.exists():
         with open(scene_color_objects_path, "r") as f:
             scene_color_objects = set(line.strip() for line in f if line.strip())
-    
+
     scene_color_objects.update(objects_with_color)
-    
+
     with open(scene_color_objects_path, "w") as f:
         for obj_id in sorted(scene_color_objects):
             f.write(f"{obj_id}\n")
-    
+
     if not scene_color_objects_path in saved_files["object_lists"]:
         saved_files["object_lists"].append(str(scene_color_objects_path))
-    
+
     # Same for no-color objects
-    scene_no_color_objects_path = paths_dict["object_lists"] / f"{scene_id}_all_no_color_objects.txt"
+    scene_no_color_objects_path = (
+        paths_dict["object_lists"] / f"{scene_id}_all_no_color_objects.txt"
+    )
     scene_no_color_objects = set()
     if scene_no_color_objects_path.exists():
         with open(scene_no_color_objects_path, "r") as f:
             scene_no_color_objects = set(line.strip() for line in f if line.strip())
-    
+
     scene_no_color_objects.update(objects_without_color)
-    
+
     with open(scene_no_color_objects_path, "w") as f:
         for obj_id in sorted(scene_no_color_objects):
             f.write(f"{obj_id}\n")
-    
+
     if not scene_no_color_objects_path in saved_files["object_lists"]:
         saved_files["object_lists"].append(str(scene_no_color_objects_path))
-    
+
     # Create/update the scene-level object table
-    scene_object_table_path = paths_dict["object_lists"] / f"{scene_id}_all_object_table.json"
+    scene_object_table_path = (
+        paths_dict["object_lists"] / f"{scene_id}_all_object_table.json"
+    )
     scene_object_table = []
-    
+
     if scene_object_table_path.exists():
         try:
             with open(scene_object_table_path, "r") as f:
@@ -487,50 +526,53 @@ def convert_frame_to_dict(tfrecord_path, frame, paths_dict: Dict[str, Path],
         except json.JSONDecodeError:
             # If the file is corrupted, start with an empty list
             scene_object_table = []
-    
+
     # Create a dictionary of existing objects in the scene table for faster lookups
     existing_objects = {entry["id"]: i for i, entry in enumerate(scene_object_table)}
-    
+
     # Update the scene object table with the frame's objects
     for obj_entry in frame_object_table:
         obj_id = obj_entry["id"]
-        
+
         if obj_id in existing_objects:
             # Update existing entry
             index = existing_objects[obj_id]
             entry = scene_object_table[index]
-            
+
             # Update timestamps - add new timestamp if not already present
             if "timestamps" not in entry:
                 entry["timestamps"] = []
-            
+
             if timestamp not in entry["timestamps"]:
                 entry["timestamps"].append(timestamp)
-            
+
             # Update visible cameras if needed
             if "visible_cameras" not in entry:
                 entry["visible_cameras"] = []
-                
-            if obj_entry.get("most_visible_camera") and obj_entry["most_visible_camera"] not in entry["visible_cameras"]:
+
+            if (
+                obj_entry.get("most_visible_camera")
+                and obj_entry["most_visible_camera"] not in entry["visible_cameras"]
+            ):
                 entry["visible_cameras"].append(obj_entry["most_visible_camera"])
         else:
             # Add new entry
             new_entry = obj_entry.copy()
             new_entry["timestamps"] = [timestamp]
-            
+
             # Initialize visible_cameras if most_visible_camera exists
             if new_entry.get("most_visible_camera"):
                 new_entry["visible_cameras"] = [new_entry["most_visible_camera"]]
             else:
                 new_entry["visible_cameras"] = []
-                
+
             scene_object_table.append(new_entry)
             existing_objects[obj_id] = len(scene_object_table) - 1
-    
+
     # Write the updated scene object table
     with open(scene_object_table_path, "w") as f:
         json.dump(scene_object_table, f, indent=2)
-    
+
     if not scene_object_table_path in saved_files["object_lists"]:
         saved_files["object_lists"].append(str(scene_object_table_path))
 
@@ -548,14 +590,19 @@ def convert_frame_to_dict(tfrecord_path, frame, paths_dict: Dict[str, Path],
 
     return saved_files
 
-def process_tfrecord(tfrecord_path: Path, paths_dict: Dict[str, Path], 
-                    objectid_to_label: Dict, objectid_to_color: Dict) -> int:
+
+def process_tfrecord(
+    tfrecord_path: Path,
+    paths_dict: Dict[str, Path],
+    objectid_to_label: Dict,
+    objectid_to_color: Dict,
+) -> int:
     process_id = mp.current_process().name
     print(f"Process {process_id} starting on {tfrecord_path.name}")
-    
+
     # Reset TensorFlow session and graph for each process
     tf.keras.backend.clear_session()
-    
+
     try:
         # Use tf.io.gfile to open the tfrecord file
         print(f"Process {process_id}: Opening TFRecord file")
@@ -565,43 +612,59 @@ def process_tfrecord(tfrecord_path: Path, paths_dict: Dict[str, Path],
             buffer_size=1024 * 1024,
             num_parallel_reads=1,
         )
-        
+
         # Force dataset initialization
         dataset = dataset.prefetch(1)
         iterator = iter(dataset)
-        
+
         frame_idx = 0
         print(f"Process {process_id}: Starting to read frames")
-        
+
         # Loop directly with an iterator to avoid TF dataset issues
         while True:
             try:
                 if frame_idx % 10 == 0:
-                    print(f"Process {process_id}: Processing frame {frame_idx} from {tfrecord_path.name}")
-                
+                    print(
+                        f"Process {process_id}: Processing frame {frame_idx} from {tfrecord_path.name}"
+                    )
+
                 data = next(iterator)
                 frame = open_dataset.Frame()
                 frame.ParseFromString(bytearray(data.numpy()))
-                
-                convert_frame_to_dict(tfrecord_path, frame, paths_dict, 
-                                     objectid_to_label, objectid_to_color)
-                
+
+                convert_frame_to_dict(
+                    tfrecord_path,
+                    frame,
+                    paths_dict,
+                    objectid_to_label,
+                    objectid_to_color,
+                )
+
                 frame_idx += 1
             except StopIteration:
                 break
             except Exception as e:
-                print(f"Process {process_id}: Error processing frame {frame_idx}: {str(e)}")
+                print(
+                    f"Process {process_id}: Error processing frame {frame_idx}: {str(e)}"
+                )
                 import traceback
+
                 traceback.print_exc()
                 continue
-        
-        print(f"Process {process_id}: Completed all {frame_idx} frames from {tfrecord_path.name}")
+
+        print(
+            f"Process {process_id}: Completed all {frame_idx} frames from {tfrecord_path.name}"
+        )
         return 1
     except Exception as e:
-        print(f"Process {process_id} failed on {tfrecord_path.name} with error: {str(e)}")
+        print(
+            f"Process {process_id} failed on {tfrecord_path.name} with error: {str(e)}"
+        )
         import traceback
+
         traceback.print_exc()
         return 0
+
 
 def setup_processing_paths(
     output_path: Path, data_dir: Path = Path("data")
@@ -637,7 +700,7 @@ def setup_processing_paths(
         "frame_infos",
         "camera_images",
         "point_clouds",
-        "object_lists"
+        "object_lists",
     ]
 
     # Create paths dictionary with both reference and output paths
@@ -658,8 +721,8 @@ def setup_processing_paths(
 
 def export_data(validation_dir, output_dir, num_processes):
     """Process a TFRecord file and visualize frames with CVAT labels"""
-    mp_context = mp.get_context('spawn')
-    
+    mp_context = mp.get_context("spawn")
+
     # Create output directory
     output_path = Path(output_dir)
     output_path.mkdir(exist_ok=True, parents=True)
@@ -690,14 +753,18 @@ def export_data(validation_dir, output_dir, num_processes):
 
     with open(paths_dict["objectid_to_color"], "r") as f:
         objectid_to_color = json.load(f)
-    
+
     if num_processes == 0:
         for tfrecord_path in tfrecord_files:
-            process_tfrecord(tfrecord_path, paths_dict, objectid_to_label, objectid_to_color)
+            process_tfrecord(
+                tfrecord_path, paths_dict, objectid_to_label, objectid_to_color
+            )
     else:
         # Update the process args to include the dictionaries
-        process_args = [(x, paths_dict, objectid_to_label, objectid_to_color) 
-                       for x in tfrecord_files]
+        process_args = [
+            (x, paths_dict, objectid_to_label, objectid_to_color)
+            for x in tfrecord_files
+        ]
 
         with mp_context.Pool(processes=num_processes) as pool:
             results = []
@@ -707,7 +774,7 @@ def export_data(validation_dir, output_dir, num_processes):
                 desc="Processing datasets",
             ):
                 results.append(result)
-        
+
         assert sum(results) == len(process_args)
 
 
@@ -734,7 +801,7 @@ def main():
 
     args = parser.parse_args()
 
-    with tf.device('/CPU:0'):
+    with tf.device("/CPU:0"):
         export_data(args.validation_path, args.output_dir, args.num_processes)
 
 
