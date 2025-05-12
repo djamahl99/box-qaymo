@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Any, List, Union, Type, TypeVar, Generic, Optional
+from typing import Dict, Any, List, Union, Type, TypeVar, Generic, Optional, Tuple
 
 from waymovqa.eval.answer import BaseAnswer 
 
