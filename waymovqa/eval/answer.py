@@ -143,7 +143,7 @@ class MultipleChoiceAnswer(BaseAnswer):
         choice_idx = matched_indices[0] if len(matched_indices) == 1 else -1
         return cls(choices=choices, choice_idx=choice_idx)
     
-class GroundingAnswer(BaseAnswer):
+class Grounding2DAnswer(BaseAnswer):
     """Typed format for 2D Grounding answers."""
     answer_type: AnswerType = AnswerType.GROUNDING_2D
     box: np.array
@@ -159,3 +159,6 @@ class GroundingAnswer(BaseAnswer):
         confidence = data['score']
         
         return cls(box=np.array(box), confidence=confidence)
+    
+    def to_dict(self):
+        return dict(box=self.box, answer_type=self.answer_type)
