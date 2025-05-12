@@ -11,6 +11,8 @@ This code creates our dataset of VQA pairs from Waymo.
     - we recommend just having an environment just for this that has an environment with ```waymo-open-dataset-tf-2-12-0==1.6.4``` to handle 
 4. Download ```objectid_to_label.json``` and ```objectid_to_color.json``` and place in ```./data```
 
+<!-- probably need the same requirements as we need waymo for projection... -->
+
 <!-- table with download links for objectid_to_label and objectid_to_color -->
 
 ### Generate the dataset
@@ -43,3 +45,34 @@ point_clouds
 ### Types of Prompts
 1. Number of {x} object
 2. 
+
+### Models to Evaluate
+
+1. SENNA
+2. Language Prompt for Autonomous Driving https://github.com/wudongming97/Prompt4Driving
+
+VLMs?
+1. OWLViT
+2. Grounding DINO
+
+ - we can evaluate these as 2d grounding models
+
+# Code Structure
+
+## waymovqa.data
+- objects for loading the extracted waymo
+
+## waymovqa.eval
+- objects for evaluating
+
+## waymovqa.metrics
+- metrics for evaluating
+
+## waymovqa.models
+- implementation of model formats, e.g. different input types / question types
+
+## waymovqa.prompts
+- prompts that can be generated for different question types
+
+## waymovqa.questions
+- objects for describing the types of questions and the data that might be supplied with it

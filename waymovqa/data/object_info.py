@@ -6,6 +6,10 @@ import cv2
 
 from .base import DataObject
 from .camera_info import CameraInfo
+from .frame_info import FrameInfo
+
+from waymo_open_dataset.wdl_limited.camera.ops import py_camera_model_ops
+from waymo_open_dataset.utils import box_utils
 
 class ObjectInfo(DataObject):
     """3D object information."""
@@ -107,11 +111,54 @@ class ObjectInfo(DataObject):
 
         return obj
 
-    def project_to_image(self, camera_info: CameraInfo) -> Optional[Dict[str, Any]]:
+    def project_to_image(self, frame_info: FrameInfo, camera_info: CameraInfo, return_depth: bool = True) -> Optional[Dict[str, Any]]:
         """Project 3D object to 2D image."""
-        # This would be implemented later
-        # Example placeholder for the implementation
-        pass
+
+        pose_matrix = frame_info.pose
+
+        box_coords = np.array(
+            [
+                [
+                    self.box['center_x'],
+                    self.box['center_y'],
+                    self.box['center_z'],
+                    self.box['length'],
+                    self.box['width'],
+                    self.box['height'],
+                    self.box['heading'],
+                ]
+            ]
+        )
+        corners = box_utils.get_upright_3d_box_corners(box_coords)[0].numpy()
+        
+        
+        homogeneous_points = np.hstack([corners, np.ones((corners.shape[0], 1))])
+        # Matrix multiplication
+        world_points_homogeneous = np.matmul(homogeneous_points, pose_matrix.T)
+        # Extract 3D coordinates
+        world_points = world_points_homogeneous[:, :3]
+
+        metadata = list([
+            camera_info.width,
+            camera_info.height,
+            camera_info.rolling_shutter_direction
+        ])
+
+        image_metadata = list(camera_info.pose)
+        image_metadata.append(camera_info.velocity.v_x)
+        image_metadata.append(camera_info.velocity.v_y)
+        image_metadata.append(camera_info.velocity.v_z)
+        image_metadata.append(camera_info.velocity.w_x)
+        image_metadata.append(camera_info.velocity.w_y)
+        image_metadata.append(camera_info.velocity.w_z)
+        image_metadata.append(camera_info.pose_timestamp)
+        image_metadata.append(camera_info.shutter)
+        image_metadata.append(camera_info.camera_trigger_time)
+        image_metadata.append(camera_info.camera_readout_done_time)
+
+        return py_camera_model_ops.world_to_image(camera_info.extrinsic, camera_info.intrinsic, \
+                                                metadata, image_metadata, \
+                                                    world_points, return_depth=return_depth).numpy()
 
     def add_frame(self, timestamp: int):
         """Add a timestamp to the list of frames where this object appears."""

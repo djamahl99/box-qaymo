@@ -4,21 +4,24 @@ from enum import Enum
 from dataclasses import dataclass
 import re
 from pydantic import BaseModel, Field, field_validator
+import json
+import numpy as np
+# TODO: tests
 
 # Define prediction and ground truth format types
 class AnswerType(str, Enum):
     OBJECT_RELATION = "object_relation"
     YES_NO = "yes_no"
     COUNTING = "counting"
-    DESCRIPTIVE = "descriptive"
+    # DESCRIPTIVE = "descriptive" # probably not
     MULTIPLE_CHOICE = "multiple_choice"
+    GROUNDING_2D = "grounding_2d"
     # Add other answer types as needed
 
 # Base models for different answer types
 class BaseAnswer(BaseModel):
     """Base class for all answer formats."""
     answer_type: AnswerType
-
 
 class ObjectRelationAnswer(BaseAnswer):
     """Typed format for object relationship answers."""
@@ -27,14 +30,14 @@ class ObjectRelationAnswer(BaseAnswer):
     reference_object: str
     object_relation: str  # e.g., "left", "right", "front", "behind"
     
-    @field_validator('spatial_relation')
+    @field_validator('object_relation')  # Changed from 'spatial_relation'
     @classmethod
     def validate_object_relation(cls, v):
         valid_relations = ["left", "right", "front", "behind"]
         if v.lower() not in valid_relations:
             raise ValueError(f"Object relation must be one of {valid_relations}")
         return v.lower()
-    
+
     @classmethod
     def from_text(cls, text: str) -> "ObjectRelationAnswer":
         """Parse a textual answer into a structured format."""
@@ -118,3 +121,41 @@ class CountingAnswer(BaseAnswer):
         object_type = match.group(2)
         
         return cls(count=count, object_type=object_type)
+    
+class MultipleChoiceAnswer(BaseAnswer):
+    """Typed format for multiple choice answers."""
+    answer_type: AnswerType = AnswerType.MULTIPLE_CHOICE
+    choices: List[str]
+    choice_idx: int  # index of the selected choice, -1 if ambiguous or not found
+
+    @classmethod
+    def from_text(cls, text: str, choices: List[str]) -> "MultipleChoiceAnswer":
+        """
+        Parse a multiple choice answer from text.
+        
+        Only one choice should match. If zero or multiple match, return an invalid index (-1).
+        """
+        matched_indices = [
+            idx for idx, choice in enumerate(choices)
+            if re.search(rf'\b{re.escape(choice)}\b', text, flags=re.IGNORECASE)
+        ]
+
+        choice_idx = matched_indices[0] if len(matched_indices) == 1 else -1
+        return cls(choices=choices, choice_idx=choice_idx)
+    
+class GroundingAnswer(BaseAnswer):
+    """Typed format for 2D Grounding answers."""
+    answer_type: AnswerType = AnswerType.GROUNDING_2D
+    box: np.array
+    
+    @classmethod
+    def from_json(cls, text: str):
+        """
+        Parse an object detection result from text.
+        """
+        data = json.loads(text)
+        
+        box = data['box']
+        confidence = data['score']
+        
+        return cls(box=np.array(box), confidence=confidence)

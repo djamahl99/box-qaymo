@@ -4,6 +4,8 @@ from typing import Dict, Any, List
 from .base import BaseMetric
 from waymovqa.eval.answer import *
 
+
+
 # Example of an updated metric class
 class ObjectRelationMetric(BaseMetric[ObjectRelationAnswer]):
     """Evaluates object relationship answers."""
