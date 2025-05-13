@@ -12,9 +12,11 @@ from waymovqa.data.object_info import ObjectInfo
 from waymovqa.data.frame_info import FrameInfo
 from waymovqa.data.camera_info import CameraInfo
 from waymovqa.data.laser_info import LaserInfo
+from waymovqa.metrics.coco import COCOMetric
 from waymovqa.prompts.base import BasePromptGenerator
 from waymovqa.prompts import register_prompt_generator
-from waymovqa.eval.answer import Grounding2DAnswer
+from waymovqa.answers import Object2DAnswer
+from waymovqa.questions import SingleImageQuestion
 
 MIN_OBJECT_SIZE = 32
 
@@ -24,7 +26,7 @@ class Grounding2DPromptGenerator(BasePromptGenerator):
 
     def generate(
         self, scene: SceneInfo, objects: List[ObjectInfo], frame: FrameInfo = None
-    ) -> List[Dict[str, Any]]:
+    ) -> List[Tuple[SingleImageQuestion, Object2DAnswer]]:
         """Generate location-based questions."""
         samples = []
 
@@ -32,7 +34,7 @@ class Grounding2DPromptGenerator(BasePromptGenerator):
         labeled_objects = [
             obj
             for obj in objects
-            if obj.cvat_label and obj.num_lidar_points_in_box > 10
+            if obj.cvat_label #and obj.num_lidar_points_in_box > 10
         ]
 
         if not labeled_objects:
@@ -46,16 +48,11 @@ class Grounding2DPromptGenerator(BasePromptGenerator):
         else:
             return []
 
-        # Get objects visible in the chosen timestamp
-        valid_objects = [obj for obj in labeled_objects if timestamp in obj.frames]
-
-        if len(valid_objects) < 2:
-            return []
-
         # Select target object
-        target_obj = random.choice(valid_objects)
+        target_obj = random.choice(labeled_objects)
 
         if not target_obj.box:
+            print('target obj has no box')
             return []
 
         # Get camera by visible
@@ -69,6 +66,7 @@ class Grounding2DPromptGenerator(BasePromptGenerator):
                 break
 
         if camera is None:
+            print('camera is none')
             return []
 
         if target_obj.cvat_color is not None and target_obj.cvat_label is not None:
@@ -77,6 +75,7 @@ class Grounding2DPromptGenerator(BasePromptGenerator):
         elif target_obj.cvat_label:
             question = f"{target_obj.cvat_label.lower()}"
         else:
+            print('target obj has no cvat label')
             return [] # TODO: should we use objects that have not been labeled in cvat?
 
         # Create answer based on object position
@@ -87,10 +86,12 @@ class Grounding2DPromptGenerator(BasePromptGenerator):
 
         # Skip if not all corners visible
         if sum(ok) < 6:
+            print('sum < 6')
             return []
         
         # The depth should all be in front of the camera
         if min(depth) < 0:
+            print('min(depth) < 0')
             return []
 
         # Filter low-quality views
@@ -98,6 +99,7 @@ class Grounding2DPromptGenerator(BasePromptGenerator):
         width = max(u) - min(u)
         height = max(v) - min(v)
         if (width < sum(ok) < 6 or height < sum(ok) < 6):
+            print('width < sum(ok) < 6 or height < sum(ok) < 6')
             return []
             
         x_min, x_max = int(min(u)), int(max(u))
@@ -107,39 +109,23 @@ class Grounding2DPromptGenerator(BasePromptGenerator):
 
         print('got valid bbox', bbox)
 
-        answer = Grounding2DAnswer(box=bbox)
-
-        samples.append(
-            {
-                "question": question,
-                "answer": answer,
-                "scene_id": scene.scene_id,
-                "timestamp": timestamp,
-                "object_id": target_obj.id,
-                "question_type": "location",
-                "metadata": {
-                    "target_object": target_obj.id,
-                    "bbox_2d": bbox
-                },
-            }
+        question = SingleImageQuestion(
+            image_path=camera.image_path, 
+            question=question,
+            object_id=target_obj.id,
+            scene_id=target_obj.scene_id,
+            timestamp=timestamp,
         )
+        answer = Object2DAnswer(box=bbox, score=1.0) # GT has 1.0 score
+
+        samples.append((question, answer))
 
         return samples
     
     def get_answer_type(self) -> type:
-        # TODO
-        return super().get_answer_type()
+        return SingleImageQuestion
     
     def get_metric_class(self) -> str:
-        # TODO
-        return super().get_metric_class()
-    
-    def is_applicable(self, scene: SceneInfo, objects: List[ObjectInfo], frame: FrameInfo = None) -> bool:
-        # TODO
-        return super().is_applicable(scene, objects, frame)
-    
-    def parse_answer(self, answer_text: str) -> Any:
-        # TODO
-        return super().parse_answer(answer_text)
+        return COCOMetric
 
 print(f"Registered prompt generator: {Grounding2DPromptGenerator.__name__}")

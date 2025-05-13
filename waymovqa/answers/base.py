@@ -7,23 +7,26 @@ from pydantic import BaseModel, Field, field_validator
 import json
 import numpy as np
 
-# TODO: tests
-
-
 # Define prediction and ground truth format types
-class QuestionType(str, Enum):
-    SINGLE_IMAGE = "single_image"
-    MULTI_IMAGE = "multi_image"
-    MULTI_IMAGE_LIDAR = "multi_image_lidar"
-    MULTI_CHOICE_SINGLE_IMAGE = "multi_choice_single_image"
+class AnswerType(str, Enum):
+    OBJECT_2D = "object_2d"
+    RAW_TEXT = "raw_text"
+    MULTIPLE_CHOICE = "multiple_choice"
 
-
-# Base models for different question types
-class BaseQuestion(BaseModel):
+# Base models for different answer types
+class BaseAnswer(BaseModel):
     """Base class for all answer formats."""
 
-    question_type: QuestionType
+    answer_type: AnswerType
 
+    @classmethod
+    def from_json(cls, text: str):
+        raise NotImplementedError()
+    
+    @classmethod
+    def from_text(cls, text: str):
+        raise NotImplementedError()
+    
     @classmethod
     def from_dict(cls, data: Dict):
         raise NotImplementedError()

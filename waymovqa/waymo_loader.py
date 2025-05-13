@@ -10,8 +10,9 @@ from waymovqa.data.frame_info import FrameInfo
 from waymovqa.data.camera_info import CameraInfo
 from waymovqa.data.laser_info import LaserInfo
 
-class DatasetLoader:
+class WaymoDatasetLoader:
     """Helper class to load and query dataset files."""
+    object_id_to_scene_id: Dict = None
 
     def __init__(self, base_path: Path):
         self.base_path = Path(base_path)
@@ -86,6 +87,59 @@ class DatasetLoader:
                 continue
 
         return objects
+
+    def load_all_objects_with_cvat_ids(self) -> List[str]:
+        """Load all objects with CVAT labels for a scene."""
+        cvat_paths = list(self.object_lists_path.rglob("*_all_cvat_objects.txt"))
+        
+        assert len(cvat_paths) == 202
+
+        # Track object_ids over all scenes with a set as there might be duplicates
+        object_ids = set()
+        object_id_to_scene_id = {}
+
+        for cvat_path in cvat_paths:
+            if not cvat_path.exists():
+                continue
+
+            scene_id = cvat_path.name.replace('_all_cvat_objects.txt', '')
+
+            with open(cvat_path, "r") as f:
+                scene_object_ids = [line.strip() for line in f if line.strip()]
+
+            for scene_object_id in scene_object_ids:
+                object_id_to_scene_id[scene_object_id] = scene_id
+
+            object_ids.update(scene_object_ids)
+
+        self.object_id_to_scene_id = object_id_to_scene_id
+
+        # Save for future
+        object_id_to_scene_id_path = self.base_path / 'object_id_to_scene_id.json'
+        if not object_id_to_scene_id_path.exists():
+            with open(object_id_to_scene_id_path, 'w') as f:
+                json.dump(object_id_to_scene_id, f)
+
+        object_ids = list(object_ids)
+
+        return object_ids
+    
+    def get_object_id_to_scene_id(self) -> Dict[str, str]:
+        """Gets mapping from object ids to scene ids."""
+        if self.object_id_to_scene_id is not None:
+            return self.object_id_to_scene_id
+        
+        object_id_to_scene_id_path = self.base_path / 'object_id_to_scene_id.json'
+
+        if not object_id_to_scene_id_path.exists():
+            self.load_all_objects_with_cvat_ids()
+
+            return self.object_id_to_scene_id
+        else:
+            with open(object_id_to_scene_id_path, 'r') as f:
+                self.object_id_to_scene_id = json.load(f)
+
+            return self.object_id_to_scene_id
 
     def load_objects_with_cvat(self, scene_id: str) -> List[ObjectInfo]:
         """Load all objects with CVAT labels for a scene."""

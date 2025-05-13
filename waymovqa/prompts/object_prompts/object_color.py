@@ -7,6 +7,8 @@ import cv2
 from collections import defaultdict
 from abc import ABC, abstractmethod
 
+from waymovqa.answers.multiple_choice import MultipleChoiceAnswer
+from waymovqa.questions.single_image import 
 from waymovqa.data.scene_info import SceneInfo
 from waymovqa.data.object_info import ObjectInfo
 from waymovqa.data.frame_info import FrameInfo
@@ -15,6 +17,8 @@ from waymovqa.data.laser_info import LaserInfo
 from waymovqa.prompts.base import BasePromptGenerator
 from waymovqa.prompts import register_prompt_generator
 
+
+from waymovqa.primitives import colors as labelled_colors
 
 @register_prompt_generator
 class ObjectColorPromptGenerator(BasePromptGenerator):
@@ -50,22 +54,18 @@ class ObjectColorPromptGenerator(BasePromptGenerator):
         for obj in random.sample(visible_objects, min(3, len(visible_objects))):
             if obj.cvat_label and obj.cvat_color:
                 question = f"What color is the {obj.cvat_label.lower()}?"
-                answer = f"The {obj.cvat_label.lower()} is {obj.cvat_color.lower()}."
 
-                samples.append(
-                    {
-                        "question": question,
-                        "answer": answer,
-                        "scene_id": scene.scene_id,
-                        "timestamp": timestamp,
-                        "object_id": obj.id,
-                        "question_type": "color",
-                        "metadata": {
-                            "target_object": obj.id,
-                            "target_label": obj.cvat_label,
-                            "color": obj.cvat_color,
-                        },
-                    }
-                )
+                question = Raw
+                answer = MultipleChoiceAnswer(choices=[x.lower() for x in labelled_colors], answer=obj.cvat_color.lower())
+
+                samples.append((question, answer))
 
         return samples
+
+    @abstractmethod
+    def get_metric_class(self) -> str:
+        return 'MultipleChoiceMetric'
+    
+    @abstractmethod
+    def get_answer_type(self):
+        return MultipleChoiceAnswer
