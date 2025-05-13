@@ -3,10 +3,12 @@ from typing import Dict
 
 from .base import AnswerType, BaseAnswer
 from .object_2d import Object2DAnswer
+from .multi_object_2d import MultiObject2DAnswer
 from .raw_text import RawTextAnswer
 
 ANSWER_TYPE_REGISTRY = {
     AnswerType.OBJECT_2D: Object2DAnswer,
+    AnswerType.MULTIPLE_OBJECT_2D: MultiObject2DAnswer,
     AnswerType.RAW_TEXT: RawTextAnswer
 }
 

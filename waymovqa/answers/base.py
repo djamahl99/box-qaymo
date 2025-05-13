@@ -22,7 +22,8 @@ class BaseAnswer(BaseModel):
 
     @classmethod
     def from_json(cls, text: str):
-        raise NotImplementedError()
+        data = json.loads(text)
+        return cls(**data)
     
     @classmethod
     def from_text(cls, text: str):

@@ -40,9 +40,6 @@ class VQADataset:
         dataset = cls(tag=data.get("tag", "unknown"))
         for entry in data["samples"]:
             question = question_from_json(entry["question"])
-
-            print('entry["answer"]', entry["answer"])
-
             answer = answer_from_json(entry["answer"])
 
             dataset.add_sample(question, answer)
