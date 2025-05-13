@@ -146,7 +146,7 @@ class MultipleChoiceAnswer(BaseAnswer):
 class Grounding2DAnswer(BaseAnswer):
     """Typed format for 2D Grounding answers."""
     answer_type: AnswerType = AnswerType.GROUNDING_2D
-    box: np.array
+    box: Any # np.array isnt a type that we can validate
     
     @classmethod
     def from_json(cls, text: str):

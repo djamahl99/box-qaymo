@@ -156,6 +156,14 @@ def convert_frame_to_dict(
         cv2.imwrite(str(img_path), img)
         saved_files["camera_images"].append(str(img_path))
 
+        calibration = None
+        for calib in frame.context.camera_calibrations:
+            if calib.name == im.name:
+                calibration = calib
+                break
+
+        assert calibration is not None
+
         # Add image metadata to frame_info
         frame_info["images"].append(
             {
@@ -168,6 +176,15 @@ def convert_frame_to_dict(
                     "w_x": float(im.velocity.w_x),
                     "w_y": float(im.velocity.w_y),
                     "w_z": float(im.velocity.w_z),
+                },
+                "intrinsic": np.array(calibration.intrinsic, np.float32).tolist(),
+                "extrinsic": np.reshape(
+                    np.array(calibration.extrinsic.transform, np.float32), [4, 4]
+                ).tolist(),
+                "metadata": {
+                    "width": int(calibration.width),
+                    "height": int(calibration.height),
+                    "rolling_shutter_direction": int(calibration.rolling_shutter_direction),
                 },
                 "pose": np.reshape(
                     np.array(im.pose.transform, np.float32), (4, 4)
@@ -664,7 +681,6 @@ def process_tfrecord(
 
         traceback.print_exc()
         return 0
-
 
 def setup_processing_paths(
     output_path: Path, data_dir: Path = Path("data")

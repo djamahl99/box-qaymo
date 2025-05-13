@@ -4,9 +4,14 @@ import json
 import numpy as np
 import cv2
 
-from .base import DataObject
-from .camera_info import CameraInfo
-from .frame_info import FrameInfo
+from waymovqa.data.base import DataObject
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from waymovqa.data.frame_info import FrameInfo  # No circular import at runtime
+    from waymovqa.data.camera_info import CameraInfo
+    from waymovqa.data.scene_info import SceneInfo
 
 from waymo_open_dataset.wdl_limited.camera.ops import py_camera_model_ops
 from waymo_open_dataset.utils import box_utils
@@ -111,10 +116,9 @@ class ObjectInfo(DataObject):
 
         return obj
 
-    def project_to_image(self, frame_info: FrameInfo, camera_info: CameraInfo, return_depth: bool = True) -> Optional[Dict[str, Any]]:
+    def project_to_image(self, frame_info: 'FrameInfo', camera_info: 'CameraInfo', scene_info: 'SceneInfo' = None, return_depth: bool = True) -> Optional[Dict[str, Any]]:
         """Project 3D object to 2D image."""
-
-        pose_matrix = frame_info.pose
+        pose_matrix = np.array(frame_info.pose)
 
         box_coords = np.array(
             [
@@ -131,7 +135,6 @@ class ObjectInfo(DataObject):
         )
         corners = box_utils.get_upright_3d_box_corners(box_coords)[0].numpy()
         
-        
         homogeneous_points = np.hstack([corners, np.ones((corners.shape[0], 1))])
         # Matrix multiplication
         world_points_homogeneous = np.matmul(homogeneous_points, pose_matrix.T)
@@ -144,19 +147,47 @@ class ObjectInfo(DataObject):
             camera_info.rolling_shutter_direction
         ])
 
-        image_metadata = list(camera_info.pose)
-        image_metadata.append(camera_info.velocity.v_x)
-        image_metadata.append(camera_info.velocity.v_y)
-        image_metadata.append(camera_info.velocity.v_z)
-        image_metadata.append(camera_info.velocity.w_x)
-        image_metadata.append(camera_info.velocity.w_y)
-        image_metadata.append(camera_info.velocity.w_z)
-        image_metadata.append(camera_info.pose_timestamp)
-        image_metadata.append(camera_info.shutter)
-        image_metadata.append(camera_info.camera_trigger_time)
-        image_metadata.append(camera_info.camera_readout_done_time)
+        image_metadata = np.array(frame_info.pose).reshape(-1).tolist()
 
-        return py_camera_model_ops.world_to_image(camera_info.extrinsic, camera_info.intrinsic, \
+        # Find camera info from scene if needed
+        camera_info_scene = None
+        if scene_info:
+            for cam in scene_info.camera_calibrations:
+                if cam.name == camera_info.name:
+                    camera_info_scene = cam
+                    break
+
+        camera_info_frame = None
+        if frame_info:
+            for cam in frame_info.cameras:
+                if cam.name == camera_info.name:
+                    camera_info_frame = cam
+                    break
+        
+        velocity = camera_info_frame.velocity
+        image_metadata.append(velocity.get('v_x', 0))
+        image_metadata.append(velocity.get('v_y', 0))
+        image_metadata.append(velocity.get('v_z', 0))
+        image_metadata.append(velocity.get('w_x', 0))
+        image_metadata.append(velocity.get('w_y', 0))
+        image_metadata.append(velocity.get('w_z', 0))
+        
+        # Get timing attributes with fallbacks
+        image_metadata.append(camera_info_frame.pose_timestamp)
+        image_metadata.append(camera_info_frame.shutter)
+        image_metadata.append(camera_info_frame.camera_trigger_time)
+        image_metadata.append(camera_info_frame.camera_readout_done_time)
+        
+        extrinsic, intrinsic = camera_info_frame.extrinsic, camera_info_scene.intrinsic
+        extrinsic = camera_info_scene.extrinsic if extrinsic is None else extrinsic
+        intrinsic = camera_info_scene.intrinsic if intrinsic is None else intrinsic
+
+        assert intrinsic is not None and extrinsic is not None
+
+        extrinsic = np.array(extrinsic, dtype=np.float32).reshape(4, 4)
+        intrinsic = np.array(intrinsic, dtype=np.float32)
+
+        return py_camera_model_ops.world_to_image(extrinsic, intrinsic, \
                                                 metadata, image_metadata, \
                                                     world_points, return_depth=return_depth).numpy()
 

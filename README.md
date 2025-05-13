@@ -42,6 +42,8 @@ point_clouds
 ```
 
 
+python vqa_generator.py --dataset_path /media/local-data/uqdetche/waymo_vqa --generators Grounding2DPromptGenerator --method object --total_samples 20 --analyze
+
 ### Types of Prompts
 1. Number of {x} object
 2. 

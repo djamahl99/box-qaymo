@@ -1,27 +1,24 @@
-from .base import PROMPT_REGISTRY, BasePromptGenerator, register_prompt_generator
+# First define the registry and registration function
+PROMPT_REGISTRY = {}
 
-# Import all prompt generators to ensure they're registered
+def register_prompt_generator(cls):
+    """Decorator to register a prompt generator class in the registry."""
+    PROMPT_REGISTRY[cls.__name__] = cls
+    return cls
+
+# Import the base class
+from .base import BasePromptGenerator
+
+# Then import the prompt generators
 from .object_prompts import *
+from .scene_prompts import *
 
-# Function to get all registered prompt generators
-def get_all_prompt_generators():
-    """Return a dictionary of all registered prompt generators."""
-    return PROMPT_REGISTRY
-
-# Function to get a specific prompt generator by name
-def get_prompt_generator(name):
-    """
-    Get a prompt generator by name.
-    
-    Args:
-        name: Name of the prompt generator class
-        
-    Returns:
-        The prompt generator class
-        
-    Raises:
-        KeyError: If the prompt generator is not found
-    """
+def get_prompt_generator(name: str):
+    """Get prompt generator by name."""
     if name not in PROMPT_REGISTRY:
-        raise KeyError(f"Prompt generator '{name}' not found in registry")
+        raise ValueError(f"Prompt generator '{name}' not found")
     return PROMPT_REGISTRY[name]
+
+def get_all_prompt_generators():
+    """Get all registered prompt generators."""
+    return PROMPT_REGISTRY

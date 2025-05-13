@@ -4,7 +4,11 @@ import json
 import numpy as np
 import cv2
 
-from waymovqa.data import *
+from waymovqa.data.scene_info import SceneInfo
+from waymovqa.data.object_info import ObjectInfo
+from waymovqa.data.frame_info import FrameInfo
+from waymovqa.data.camera_info import CameraInfo
+from waymovqa.data.laser_info import LaserInfo
 
 class DatasetLoader:
     """Helper class to load and query dataset files."""

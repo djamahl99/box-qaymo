@@ -7,9 +7,10 @@ import cv2
 from collections import defaultdict
 from abc import ABC, abstractmethod
 
-from waymovqa.data import SceneInfo, ObjectInfo, FrameInfo
-from .waymo_loader import DatasetLoader
-from waymovqa.prompts.base import BasePromptGenerator, get_all_prompt_generators, get_prompt_generator
+from waymovqa.data.frame_info import FrameInfo
+from waymovqa.data.object_info import ObjectInfo
+from waymovqa.waymo_loader import DatasetLoader
+from waymovqa.prompts import get_all_prompt_generators, get_prompt_generator, BasePromptGenerator
 
 class VQAGenerator:
     """Main class for generating VQA samples."""
@@ -29,6 +30,7 @@ class VQAGenerator:
         self.dataset_path = Path(dataset_path)
         self.loader = DatasetLoader(self.dataset_path)
 
+        print("Registered prompt generators:", get_all_prompt_generators())
         if prompt_generators is None:
             # Use all registered prompt generators
             self.prompt_generators = [
@@ -266,12 +268,13 @@ class VQAGenerator:
                             for generator in self.prompt_generators:
                                 samples = generator.generate(scene, visible_objects, frame)
                                 # Filter to keep only samples involving the target object
-                                for sample in samples:
-                                    if ("object_id" in sample and sample["object_id"] == obj.id) or \
-                                       ("object_ids" in sample and obj.id in sample["object_ids"]):
-                                        samples_for_obj.append(sample)
+                                # for sample in samples:
+                                #     if ("object_id" in sample and sample["object_id"] == obj.id) or \
+                                #        ("object_ids" in sample and obj.id in sample["object_ids"]):
+                                #         samples_for_obj.append(sample)
                             
-                            all_samples.extend(samples_for_obj)
+                                all_samples.extend(samples)
+                            print('all_samples', len(all_samples))
                         except FileNotFoundError:
                             continue
             except FileNotFoundError:

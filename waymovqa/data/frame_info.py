@@ -4,10 +4,10 @@ import json
 import numpy as np
 import cv2
 
-from .base import DataObject
-from .object_info import ObjectInfo
-from .camera_info import CameraInfo
-from .laser_info import LaserInfo
+from waymovqa.data.base import DataObject
+from waymovqa.data.object_info import ObjectInfo
+from waymovqa.data.camera_info import CameraInfo
+from waymovqa.data.laser_info import LaserInfo
 
 class FrameInfo(DataObject):
     """Frame information."""

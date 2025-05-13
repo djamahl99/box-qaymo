@@ -1,30 +1,15 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Union, Type, TypeVar, Generic, Optional
 
-from waymovqa.data import FrameInfo, ObjectInfo, SceneInfo
+from waymovqa.data.scene_info import SceneInfo
+from waymovqa.data.object_info import ObjectInfo
+from waymovqa.data.frame_info import FrameInfo
+from waymovqa.data.camera_info import CameraInfo
+from waymovqa.data.laser_info import LaserInfo
 from waymovqa.eval.answer import BaseAnswer
 
 # Update BasePromptGenerator with typing information
 T = TypeVar('T', bound=BaseAnswer)
-
-# Registry to store all prompt generators
-PROMPT_REGISTRY = {}
-
-
-def register_prompt_generator(cls):
-    """Decorator to register a prompt generator class in the registry."""
-    PROMPT_REGISTRY[cls.__name__] = cls
-    return cls
-
-def get_prompt_generator(name: str):
-    """Get prompt generator by name."""
-    if name not in PROMPT_REGISTRY:
-        raise ValueError(f"Prompt generator '{name}' not found")
-    return PROMPT_REGISTRY[name]
-
-def get_all_prompt_generators():
-    """Get all registered prompt generators."""
-    return PROMPT_REGISTRY
 
 
 class BasePromptGenerator(Generic[T], ABC):

@@ -7,9 +7,13 @@ import cv2
 from collections import defaultdict
 from abc import ABC, abstractmethod
 
-from waymovqa.data import *
-from ..base import BasePromptGenerator, register_prompt_generator
-
+from waymovqa.data.scene_info import SceneInfo
+from waymovqa.data.object_info import ObjectInfo
+from waymovqa.data.frame_info import FrameInfo
+from waymovqa.data.camera_info import CameraInfo
+from waymovqa.data.laser_info import LaserInfo
+from waymovqa.prompts.base import BasePromptGenerator
+from waymovqa.prompts import register_prompt_generator
 
 @register_prompt_generator
 class ObjectLocationPromptGenerator(BasePromptGenerator):

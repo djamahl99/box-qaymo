@@ -1,14 +1,19 @@
 import random
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Union, Set, Tuple
+from typing import Dict, List, Any, Optional, Type, Union, Set, Tuple
 import json
 import numpy as np
 import cv2
 from collections import defaultdict
 from abc import ABC, abstractmethod
 
-from waymovqa.data import *
-from ..base import BasePromptGenerator, register_prompt_generator
+from waymovqa.data.scene_info import SceneInfo
+from waymovqa.data.object_info import ObjectInfo
+from waymovqa.data.frame_info import FrameInfo
+from waymovqa.data.camera_info import CameraInfo
+from waymovqa.data.laser_info import LaserInfo
+from waymovqa.prompts.base import BasePromptGenerator
+from waymovqa.prompts import register_prompt_generator
 from waymovqa.eval.answer import Grounding2DAnswer
 
 MIN_OBJECT_SIZE = 32
@@ -56,8 +61,9 @@ class Grounding2DPromptGenerator(BasePromptGenerator):
         # Get camera by visible
         camera_name = target_obj.visible_cameras[0]
 
+        # get scene camera
         camera = None
-        for cam in frame.cameras:
+        for cam in scene.camera_calibrations:
             if cam.name == camera_name:
                 camera = cam
                 break
@@ -74,7 +80,7 @@ class Grounding2DPromptGenerator(BasePromptGenerator):
             return [] # TODO: should we use objects that have not been labeled in cvat?
 
         # Create answer based on object position
-        uvdok = target_obj.project_to_image(frame, camera, )
+        uvdok = target_obj.project_to_image(frame_info=frame, camera_info=camera, scene_info=scene, return_depth=True)
         
         u, v, depth, ok = uvdok.transpose()
         ok = ok.astype(bool)
@@ -92,12 +98,14 @@ class Grounding2DPromptGenerator(BasePromptGenerator):
         width = max(u) - min(u)
         height = max(v) - min(v)
         if (width < sum(ok) < 6 or height < sum(ok) < 6):
-            []
+            return []
             
         x_min, x_max = int(min(u)), int(max(u))
         y_min, y_max = int(min(v)), int(max(v))
 
         bbox = [x_min, y_min, x_max, y_max]
+
+        print('got valid bbox', bbox)
 
         answer = Grounding2DAnswer(box=bbox)
 
@@ -117,3 +125,21 @@ class Grounding2DPromptGenerator(BasePromptGenerator):
         )
 
         return samples
+    
+    def get_answer_type(self) -> type:
+        # TODO
+        return super().get_answer_type()
+    
+    def get_metric_class(self) -> str:
+        # TODO
+        return super().get_metric_class()
+    
+    def is_applicable(self, scene: SceneInfo, objects: List[ObjectInfo], frame: FrameInfo = None) -> bool:
+        # TODO
+        return super().is_applicable(scene, objects, frame)
+    
+    def parse_answer(self, answer_text: str) -> Any:
+        # TODO
+        return super().parse_answer(answer_text)
+
+print(f"Registered prompt generator: {Grounding2DPromptGenerator.__name__}")
