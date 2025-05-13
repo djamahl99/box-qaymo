@@ -23,7 +23,7 @@ class VQAGenerator:
         self,
         dataset_path: Path,
         prompt_generators: Optional[Union[List[str], List[BasePromptGenerator]]] = None,
-        model: BaseModel = None
+        model: BaseModel = None # TODO - infer prompt generators / from model
     ):
         """
         Initialize VQA generator.
@@ -199,7 +199,7 @@ def main():
     parser = argparse.ArgumentParser(description="Generate VQA dataset from processed data")
     parser.add_argument("--dataset_path", type=str, required=True, help="Path to processed waymo dataset")
     parser.add_argument("--save_path", type=str, required=True, help="Path to save dataset")
-    parser.add_argument("--model", type=str, required=True, help="Model name")
+    parser.add_argument("--model", type=str, default=None, required=False, help="Model name")
     parser.add_argument("--method", type=str, default="combined", choices=["scene", "object", "combined"],
                         help="Generation method")
     parser.add_argument("--questions_per_scene", type=int, default=5, 
@@ -212,8 +212,10 @@ def main():
     
     args = parser.parse_args()
 
-    
-    model = MODEL_REGISTRY[args.model.lower()]
+    if args.model is not None:
+        model = MODEL_REGISTRY[args.model.lower()]
+    else:
+        model = None
 
     # Initialize generator
     generator = VQAGenerator(

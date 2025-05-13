@@ -16,5 +16,8 @@ def question_from_json(text: str) -> BaseQuestion:
     return cls.from_json(text)
 
 def question_from_dict(data: Dict) -> BaseQuestion:
+    import pprint
+    pprint.pprint(data)
+    print('question_from_dict', data)
     cls = QUESTION_TYPE_REGISTRY[QuestionType(data["question_type"])]
     return cls.from_json(data)

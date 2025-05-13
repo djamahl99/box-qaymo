@@ -14,15 +14,8 @@ TQ = TypeVar("T", bound=BaseAnswer)
 TA = TypeVar("T", bound=BaseQuestion)
 
 
-class BasePromptGenerator(Generic[T], ABC):
+class BasePromptGenerator(Generic[TQ], ABC):
     """Base class for all prompt generators with typed answers."""
-
-    @abstractmethod
-    def is_applicable(
-        self, scene: SceneInfo, objects: List[ObjectInfo], frame: FrameInfo = None
-    ) -> bool:
-        """Check if this generator can be applied to the given scene."""
-        pass
 
     @abstractmethod
     def generate(

@@ -10,6 +10,7 @@ import numpy as np
 # Define prediction and ground truth format types
 class AnswerType(str, Enum):
     OBJECT_2D = "object_2d"
+    MULTIPLE_OBJECT_2D = "multi_object_2d"
     RAW_TEXT = "raw_text"
     MULTIPLE_CHOICE = "multiple_choice"
 

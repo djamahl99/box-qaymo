@@ -52,21 +52,19 @@ class Grounding2DPromptGenerator(BasePromptGenerator):
         target_obj = random.choice(labeled_objects)
 
         if not target_obj.box:
-            print('target obj has no box')
             return []
 
         # Get camera by visible
         camera_name = target_obj.visible_cameras[0]
 
-        # get scene camera
+        # Get frame camera
         camera = None
-        for cam in scene.camera_calibrations:
+        for cam in frame.cameras:
             if cam.name == camera_name:
                 camera = cam
                 break
 
         if camera is None:
-            print('camera is none')
             return []
 
         if target_obj.cvat_color is not None and target_obj.cvat_label is not None:
@@ -75,7 +73,6 @@ class Grounding2DPromptGenerator(BasePromptGenerator):
         elif target_obj.cvat_label:
             question = f"{target_obj.cvat_label.lower()}"
         else:
-            print('target obj has no cvat label')
             return [] # TODO: should we use objects that have not been labeled in cvat?
 
         # Create answer based on object position
@@ -86,12 +83,10 @@ class Grounding2DPromptGenerator(BasePromptGenerator):
 
         # Skip if not all corners visible
         if sum(ok) < 6:
-            print('sum < 6')
             return []
         
         # The depth should all be in front of the camera
         if min(depth) < 0:
-            print('min(depth) < 0')
             return []
 
         # Filter low-quality views
@@ -99,7 +94,6 @@ class Grounding2DPromptGenerator(BasePromptGenerator):
         width = max(u) - min(u)
         height = max(v) - min(v)
         if (width < sum(ok) < 6 or height < sum(ok) < 6):
-            print('width < sum(ok) < 6 or height < sum(ok) < 6')
             return []
             
         x_min, x_max = int(min(u)), int(max(u))
@@ -107,14 +101,14 @@ class Grounding2DPromptGenerator(BasePromptGenerator):
 
         bbox = [x_min, y_min, x_max, y_max]
 
-        print('got valid bbox', bbox)
-
+        print('camera.image_path', camera.image_path)
         question = SingleImageQuestion(
             image_path=camera.image_path, 
             question=question,
             object_id=target_obj.id,
             scene_id=target_obj.scene_id,
             timestamp=timestamp,
+            camera_name=camera.name
         )
         answer = Object2DAnswer(box=bbox, score=1.0) # GT has 1.0 score
 
@@ -122,6 +116,9 @@ class Grounding2DPromptGenerator(BasePromptGenerator):
 
         return samples
     
+    def get_question_type(self):
+        return Object2DAnswer
+
     def get_answer_type(self) -> type:
         return SingleImageQuestion
     

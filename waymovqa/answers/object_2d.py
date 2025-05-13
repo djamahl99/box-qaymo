@@ -12,10 +12,7 @@ class Object2DAnswer(BaseAnswer):
     answer_type: AnswerType = AnswerType.OBJECT_2D
     box: List[float]  # Format: [x1, y1, x2, y2]
     score: float
-
-    def __init__(self, box: List[float], score: float = 1.0):
-        self.box = box
-        self.score = score
+    prompt: Optional[str] = None
 
     @classmethod
     def from_text(cls, text: str):
@@ -23,7 +20,8 @@ class Object2DAnswer(BaseAnswer):
         data = json.loads(text)
         box = data["box"]
         score = data.get("score", 1.0)
-        return cls(box=box, score=score)
+        prompt = data.get("prompt", None)
+        return cls(box=box, score=score, prompt=prompt)
 
     @classmethod
     def from_json(cls, text: str):
@@ -31,7 +29,8 @@ class Object2DAnswer(BaseAnswer):
         data = json.loads(text)
         box = data["box"]
         score = data.get("score", 1.0)
-        return cls(box=box, score=score)
+        prompt = data.get("prompt", None)
+        return cls(box=box, score=score, prompt=prompt)
 
     @classmethod
     def from_dict(cls, data: Dict):
@@ -42,5 +41,10 @@ class Object2DAnswer(BaseAnswer):
 
     def to_json(self):
         return json.dumps(
-            dict(box=self.box, score=self.score, answer_type=str(self.answer_type))
+            dict(
+                box=self.box,
+                score=self.score,
+                prompt=self.prompt,
+                answer_type=str(self.answer_type),
+            )
         )

@@ -1,8 +1,8 @@
 from typing import List, Dict, Tuple, Union, Type
 
 from waymovqa.answers.base import BaseAnswer
-from waymovqa.answers import answer_from_dict
-from waymovqa.questions import question_from_dict
+from waymovqa.answers import answer_from_dict, answer_from_json
+from waymovqa.questions import question_from_dict, question_from_json
 from waymovqa.questions.base import BaseQuestion
 
 import json
@@ -39,8 +39,11 @@ class VQADataset:
 
         dataset = cls(tag=data.get("tag", "unknown"))
         for entry in data["samples"]:
-            question = question_from_dict(entry["question"])
-            answer = answer_from_dict(entry["answer"])
+            question = question_from_json(entry["question"])
+
+            print('entry["answer"]', entry["answer"])
+
+            answer = answer_from_json(entry["answer"])
 
             dataset.add_sample(question, answer)
 

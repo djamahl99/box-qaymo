@@ -8,6 +8,7 @@ class SingleImageQuestion(BaseQuestion):
     object_id: str
     scene_id: str
     timestamp: int
+    camera_name: str
 
     @classmethod
     def from_dict(cls, data: Dict):
@@ -18,4 +19,5 @@ class SingleImageQuestion(BaseQuestion):
             object_id=data['object_id'],
             scene_id=data['scene_id'],
             timestamp=data['timestamp'],
+            camera_name=data['camera_name']
         )

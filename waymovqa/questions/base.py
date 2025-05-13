@@ -26,4 +26,10 @@ class BaseQuestion(BaseModel):
 
     @classmethod
     def from_dict(cls, data: Dict):
-        raise NotImplementedError()
+        return cls(**data)
+
+    @classmethod
+    def from_json(cls, data: str):
+        data = json.loads(data)
+
+        return cls(**data)

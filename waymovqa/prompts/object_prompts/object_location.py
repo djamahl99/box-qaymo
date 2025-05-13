@@ -7,6 +7,7 @@ import cv2
 from collections import defaultdict
 from abc import ABC, abstractmethod
 
+from waymovqa.answers.multiple_choice import MultipleChoiceAnswer
 from waymovqa.data.scene_info import SceneInfo
 from waymovqa.data.object_info import ObjectInfo
 from waymovqa.data.frame_info import FrameInfo
@@ -27,8 +28,8 @@ class ObjectLocationPromptGenerator(BasePromptGenerator):
     
     @abstractmethod
     def get_metric_class(self) -> str:
-        return ''
-    
+        return "MultipleChoiceMetric"
+
     @abstractmethod
     def get_answer_type(self):
-        return None
+        return MultipleChoiceAnswer

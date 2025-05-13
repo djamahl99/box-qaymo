@@ -16,6 +16,9 @@ class WaymoDatasetLoader:
 
     def __init__(self, base_path: Path):
         self.base_path = Path(base_path)
+
+        assert self.base_path.exists(), f'{base_path} does not exist!'
+
         self.scene_infos_path = self.base_path / "scene_infos"
         self.frame_infos_path = self.base_path / "frame_infos"
         self.object_infos_path = self.base_path / "object_infos"
@@ -92,7 +95,7 @@ class WaymoDatasetLoader:
         """Load all objects with CVAT labels for a scene."""
         cvat_paths = list(self.object_lists_path.rglob("*_all_cvat_objects.txt"))
         
-        assert len(cvat_paths) == 202
+        assert len(cvat_paths) == 202, f'got {len(cvat_paths)} cvat paths'
 
         # Track object_ids over all scenes with a set as there might be duplicates
         object_ids = set()
@@ -209,7 +212,7 @@ class WaymoDatasetLoader:
         frame_files = [f for f in self.frame_infos_path.glob(f"{prefix}*.json")]
         return [int(f.stem.replace(prefix, "")) for f in frame_files]
 
-    def load_image(self, camera_info: CameraInfo, timestamp: int = None) -> np.ndarray:
+    def get_image_path(self, camera_info: CameraInfo, timestamp: int = None) -> str:
         """Load camera image from path."""
         if timestamp is not None:
             # Construct image path based on scene_id, timestamp, and camera name
@@ -225,6 +228,12 @@ class WaymoDatasetLoader:
 
         if not img_path.exists():
             raise FileNotFoundError(f"Image not found at {img_path}")
+        
+        return str(img_path)
+
+    def load_image(self, camera_info: CameraInfo, timestamp: int = None) -> np.ndarray:
+        """Load camera image from path."""
+        img_path = self.get_image_path(camera_info, timestamp)
 
         return cv2.imread(str(img_path))
 

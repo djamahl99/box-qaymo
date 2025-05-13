@@ -103,18 +103,25 @@ class COCOMetric(BaseMetric[Object2DAnswer]):
             gt_box = np.array(ground_truth.box)
             
             iou = self._compute_iou(pred_box, gt_box)
+            print('iou', iou)
             match = float(iou >= self.iou_threshold)
             
             # Store for accumulation
             self.scores.append(prediction.score)
             self.matches.append(match)
             
-            return {
-                "iou": iou,
-                "match": match,
-                "score": prediction.score
-            }
+            # return {
+            #     "iou": iou,
+            #     "match": match,
+            #     "score": prediction.score
+            # }
         
+            return {
+                "scores": [prediction.score],
+                "matches": [match],
+                "prompt": prediction.prompt if hasattr(prediction, 'prompt') else None
+            }
+
         # Handle MultiObject2DAnswer or convert single to multi
         pred_multi = prediction if hasattr(prediction, 'boxes') else MultiObject2DAnswer.from_single_object(prediction)
         gt_multi = ground_truth if hasattr(ground_truth, 'boxes') else MultiObject2DAnswer.from_single_object(ground_truth)
