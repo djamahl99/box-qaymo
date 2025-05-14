@@ -62,11 +62,11 @@ class WaymoDatasetLoader:
         self.frames[frame_key] = frame
         return frame
 
-    def load_object(self, object_id: str, scene_id: str) -> ObjectInfo:
+    def load_object(self, object_id: str, scene_id: str, timestamp: int) -> ObjectInfo:
         """Load object by ID and scene ID."""
-        obj_key = f"{object_id}_{scene_id}"
-        if obj_key in self.objects:
-            return self.objects[obj_key]
+        obj_key = f"{object_id}_{scene_id}_{timestamp}"
+        # if obj_key in self.objects:
+            # return self.objects[obj_key]
 
         obj_path = self.object_infos_path / f"object_{obj_key}.json"
         if not obj_path.exists():
@@ -76,26 +76,12 @@ class WaymoDatasetLoader:
         self.objects[obj_key] = obj
         return obj
 
-    def load_objects_for_frame(self, scene_id: str, timestamp: int) -> List[ObjectInfo]:
-        """Load all objects for a specific frame."""
-        frame = self.load_frame(scene_id, timestamp)
-        objects = []
-
-        for obj_ref in frame.objects:
-            try:
-                obj = self.load_object(obj_ref["id"], scene_id)
-                objects.append(obj)
-            except FileNotFoundError:
-                # Skip objects that can't be found
-                continue
-
-        return objects
-
     def load_all_objects_with_cvat_ids(self) -> List[str]:
         """Load all objects with CVAT labels for a scene."""
         cvat_paths = list(self.object_lists_path.rglob("*_all_cvat_objects.txt"))
         
-        assert len(cvat_paths) == 202, f'got {len(cvat_paths)} cvat paths'
+        # TODO: uncomment after extracting objects again
+        # assert len(cvat_paths) == 202, f'got {len(cvat_paths)} cvat paths'
 
         # Track object_ids over all scenes with a set as there might be duplicates
         object_ids = set()

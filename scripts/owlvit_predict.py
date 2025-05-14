@@ -482,8 +482,9 @@ def run_on_dataset(
             print('prompt_out', selected_objectness.min(), selected_objectness.max())
 
             # TODO: update scoring?
-            # final_scores = (prompt_out + selected_objectness.reshape(prompt_out.shape)) / 2.0
-            final_scores = (prompt_out * selected_objectness.reshape(prompt_out.shape))
+            final_scores = (prompt_out + selected_objectness.reshape(prompt_out.shape)) / 2.0
+            # final_scores = (prompt_out * selected_objectness.reshape(prompt_out.shape))
+            # final_scores = (prompt_out * selected_objectness.reshape(prompt_out.shape))
 
             print('final_scores', final_scores.shape)
             print('final_scores', final_scores.min(), final_scores.max())
@@ -620,16 +621,17 @@ def main():
     gt_dataset = VQADataset.load_dataset(args.vqa_path)
 
     save_path = Path(args.save_path)
+    dataset_path = Path(args.dataset_path)
 
     if not save_path.exists():
         owlvit_model = OWLv2Detector(args.pretrained_name, ['placeholder']).to(args.device)
 
-        pred_dataset = run_on_dataset(gt_dataset, owlvit_model, Path(args.dataset_path), save_path, args.batch_size, args.conf_thresh, args.nms_thresh)
+        pred_dataset = run_on_dataset(gt_dataset, owlvit_model, dataset_path, save_path, args.batch_size, args.conf_thresh, args.nms_thresh)
     else:
         pred_dataset = VQADataset.load_dataset(str(save_path))
 
     # evaluate?
-    coco_eval = COCOEvaluator()
+    coco_eval = COCOEvaluator(dataset_path)
 
     predictions = [x[1] for x in pred_dataset.samples]
     ground_truths = [x[1] for x in gt_dataset.samples]
@@ -637,12 +639,13 @@ def main():
     # get the questions from both pred / gt to check they are matching
     prompts0 = [x[0].question for x in pred_dataset.samples]
     prompts1 = [x[0].question for x in gt_dataset.samples]
+    questions = [x[0] for x in gt_dataset.samples]
 
     print('prompts0', len(prompts0))
     print('prompts1', len(prompts1))
     assert all([prompts0[i] == prompts1[i] for i in range(len(prompts0))]) and len(prompts0) == len(prompts1)
 
-    pprint.pprint(coco_eval.evaluate(predictions, ground_truths, prompts0))
+    pprint.pprint(coco_eval.evaluate(predictions, ground_truths, questions))
 
 if __name__ == "__main__":
     main()

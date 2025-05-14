@@ -64,7 +64,13 @@ class FrameInfo(DataObject):
             pc = LaserInfo.from_dict(pc_data)
             frame.point_clouds.append(pc)
 
-        # Object references are loaded separately
+        for obj in data.get("objects", []):
+            if 'path' in obj:
+                if 'dataset_path' in data:
+                    path = Path(data['dataset_path']) / obj['path']
+                    frame.add_object(ObjectInfo.load(path))
+            else:
+                frame.add_object(ObjectInfo.from_dict(obj))
 
         frame.range_image_top_pose = data.get("range_image_top_pose")
         frame.camera_projections = data.get("camera_projections", {})
@@ -87,3 +93,13 @@ class FrameInfo(DataObject):
         self.objects.append(obj)
         # Update the object's frames list
         obj.add_frame(self.timestamp)
+
+    @classmethod
+    def load(cls, path: Path):
+        """Load object from file."""
+        with open(path, "r") as f:
+            data = json.load(f)
+
+        data['dataset_path'] = path.parent.parent
+
+        return cls.from_dict(data)

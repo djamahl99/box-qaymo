@@ -10,7 +10,7 @@ from abc import ABC, abstractmethod
 from waymovqa.data.frame_info import FrameInfo
 from waymovqa.data.object_info import ObjectInfo
 from waymovqa.waymo_loader import WaymoDatasetLoader
-from waymovqa.prompts import get_all_prompt_generators, get_prompt_generator, BasePromptGenerator
+from waymovqa.prompt_generators import get_all_prompt_generators, get_prompt_generator, BasePromptGenerator
 from waymovqa.models import MODEL_REGISTRY
 from waymovqa.models.base import BaseModel
 
@@ -117,51 +117,70 @@ class VQAGenerator:
         object_ids = self.loader.load_all_objects_with_cvat_ids()
         
         all_samples = []
+        sampled_object_ids = set()
         
         # First pass: generate a large pool of samples
         while len(all_samples) < total_samples * 3:
             # Sample an object id
             object_id = random.choice(object_ids)
 
-            print('sampled', object_id)
+            if object_id in sampled_object_ids:
+                continue
 
             # get the corresponding scene
             scene_id = self.loader.get_object_id_to_scene_id()[object_id]
 
-            try:
-                # Load scene
-                scene = self.loader.load_scene(scene_id)
-                
-                # Load object
-                sampled_object = self.loader.load_object(object_id, scene_id)
+            # Load scene
+            scene = self.loader.load_scene(scene_id)
 
-                # Sample a frame for this object TODO: allow for multiple timestamp - integrate different answer / question in generator
-                print('len(sampled_object.frames)', len(sampled_object.frames))
-                timestamp = random.choice(sampled_object.frames)
+            scene_object_table = self.loader.load_scene_object_table(scene_id)
+            
+            scene_object_table_timestamp = None
+            for obj in scene_object_table:
+                if obj['id'] == object_id:
+                    timestamps = obj['timestamps']
 
-                print('sampled timestamp', timestamp)
-                frame = self.loader.load_frame(scene_id, timestamp)
-                
-                if not object:
-                    continue
+                    scene_object_table_timestamp = random.choice(timestamps)
 
-                # Generate samples
-                for generator in self.prompt_generators:
-                    samples = generator.generate(scene, [sampled_object], frame)
-                    print('samples', samples)
-                    all_samples.extend(samples)
-
-            except FileNotFoundError:
+            if scene_object_table_timestamp is None:
                 continue
+
+            # Load object
+            sampled_object = self.loader.load_object(object_id, scene_id, scene_object_table_timestamp)
+
+            # Sample a frame for this object TODO: allow for multiple timestamp - integrate different answer / question in generator
+            timestamp = random.choice(sampled_object.frames)
+
+            frame = self.loader.load_frame(scene_id, timestamp)
+
+            assert object_id in [x.id for x in frame.objects]
+
+            sampled_object_frame = None
+            for obj in frame.objects:
+                if obj.id == sampled_object.id:
+                    sampled_object_frame = obj
+                    break
+
+            if not sampled_object_frame:
+                continue
+
+            # Generate samples
+            for generator in self.prompt_generators:
+                samples = generator.generate(scene, [sampled_object_frame], frame)
+                all_samples.extend(samples)
+
+                sampled_object_ids.add(object_id)
+
                 
             # Stop if we have enough samples
             if len(all_samples) >= total_samples * 3:  # Generate 3x to allow for selection
                 break
         
         # TODO: sample analytics and then subsampling?
-        subsamples = random.sample(all_samples, total_samples)
+        subsamples = random.sample(all_samples, len(all_samples)) # can subsam
 
         for sample in subsamples:
+            print('sample', sample)
             self.dataset.add_sample(*sample)
 
     def generate_dataset(self, questions_per_scene: int = 5, total_samples: int = 500, 

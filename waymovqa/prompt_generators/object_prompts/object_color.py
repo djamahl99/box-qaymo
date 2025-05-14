@@ -14,8 +14,8 @@ from waymovqa.data.object_info import ObjectInfo
 from waymovqa.data.frame_info import FrameInfo
 from waymovqa.data.camera_info import CameraInfo
 from waymovqa.data.laser_info import LaserInfo
-from waymovqa.prompts.base import BasePromptGenerator
-from waymovqa.prompts import register_prompt_generator
+from waymovqa.prompt_generators.base import BasePromptGenerator
+from waymovqa.prompt_generators import register_prompt_generator
 
 
 from waymovqa.primitives import colors as labelled_colors

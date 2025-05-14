@@ -291,6 +291,9 @@ def convert_frame_to_dict(
         ):
             visible_cameras_for_obj.append(label.most_visible_camera_name)
 
+        if len(label.most_visible_camera_name) == 0: # not visible on camera -> don't bother extracting
+            continue
+
         obj_info = {
             "id": object_id,
             "scene_id": scene_id,
@@ -357,14 +360,11 @@ def convert_frame_to_dict(
             {
                 "id": object_id,
                 "scene_id": scene_id,
-                "timestamp": timestamp,
                 "type": label_pb2.Label.Type.Name(label.type),
                 "in_cvat": in_cvat,
                 "cvat_label": cvat_label,
                 "has_color": cvat_color is not None,
                 "cvat_color": cvat_color,
-                "num_lidar_points": int(label.num_lidar_points_in_box),
-                "most_visible_camera": getattr(label, "most_visible_camera_name", None),
             }
         )
 
@@ -372,32 +372,33 @@ def convert_frame_to_dict(
         object_path_pattern = f"object_{object_id}_*.json"
         existing_files = list(paths_dict["object_infos"].glob(object_path_pattern))
 
-        if existing_files:
-            # Load the existing object info and update it
-            existing_file = existing_files[0]
-            with open(existing_file, "r") as f:
-                existing_obj_info = json.load(f)
+        # if existing_files:
+        #     # Load the existing object info and update it
+        #     existing_file = existing_files[0]
+        #     with open(existing_file, "r") as f:
+        #         existing_obj_info = json.load(f)
 
-            # Update frames list
-            if timestamp not in existing_obj_info["frames"]:
-                existing_obj_info["frames"].append(timestamp)
+        #     # Update frames list
+        #     if timestamp not in existing_obj_info["frames"]:
+        #         existing_obj_info["frames"].append(timestamp)
 
-            # Update visible cameras list
-            for cam in visible_cameras_for_obj:
-                if cam not in existing_obj_info["visible_cameras"]:
-                    existing_obj_info["visible_cameras"].append(cam)
+        #     # Update visible cameras list
+        #     for cam in visible_cameras_for_obj:
+        #         if cam not in existing_obj_info["visible_cameras"]:
+        #             existing_obj_info["visible_cameras"].append(cam)
 
-            # Keep the existing file but update its contents
-            obj_path = existing_file
-            with open(obj_path, "w") as f:
-                json.dump(existing_obj_info, f, indent=2)
-        else:
-            # Create a new file with scene ID and timestamp in the name
-            obj_path = (
-                paths_dict["object_infos"] / f"object_{object_id}_{scene_id}.json"
-            )
-            with open(obj_path, "w") as f:
-                json.dump(obj_info, f, indent=2)
+        #     # Keep the existing file but update its contents
+        #     obj_path = existing_file
+        #     with open(obj_path, "w") as f:
+        #         json.dump(existing_obj_info, f, indent=2)
+        # else:
+
+        # Create a new file with scene ID and timestamp in the name
+        obj_path = (
+            paths_dict["object_infos"] / f"object_{object_id}_{scene_id}_{timestamp}.json"
+        )
+        with open(obj_path, "w") as f:
+            json.dump(obj_info, f, indent=2)
 
         saved_files["object_infos"].append(str(obj_path))
 
@@ -562,26 +563,10 @@ def convert_frame_to_dict(
 
             if timestamp not in entry["timestamps"]:
                 entry["timestamps"].append(timestamp)
-
-            # Update visible cameras if needed
-            if "visible_cameras" not in entry:
-                entry["visible_cameras"] = []
-
-            if (
-                obj_entry.get("most_visible_camera")
-                and obj_entry["most_visible_camera"] not in entry["visible_cameras"]
-            ):
-                entry["visible_cameras"].append(obj_entry["most_visible_camera"])
         else:
             # Add new entry
             new_entry = obj_entry.copy()
             new_entry["timestamps"] = [timestamp]
-
-            # Initialize visible_cameras if most_visible_camera exists
-            if new_entry.get("most_visible_camera"):
-                new_entry["visible_cameras"] = [new_entry["most_visible_camera"]]
-            else:
-                new_entry["visible_cameras"] = []
 
             scene_object_table.append(new_entry)
             existing_objects[obj_id] = len(scene_object_table) - 1

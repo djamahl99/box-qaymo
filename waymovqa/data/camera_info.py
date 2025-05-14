@@ -1,4 +1,5 @@
 from pathlib import Path
+import pprint
 from typing import Dict, List, Any, Optional, Union, Tuple
 import json
 import numpy as np
@@ -82,6 +83,12 @@ class CameraInfo(DataObject):
             height=data.get("height"),
             rolling_shutter_direction=data.get("rolling_shutter_direction"),
         )
+
+        if "metadata" in data:
+            metadata = data['metadata']
+            camera.width = metadata.get("width", camera.width)
+            camera.height = metadata.get("height", camera.height)
+            camera.rolling_shutter_direction = metadata.get("rolling_shutter_direction", camera.rolling_shutter_direction)
 
         if "path" in data:
             camera.image_path = data["path"]

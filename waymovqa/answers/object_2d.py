@@ -12,6 +12,7 @@ class Object2DAnswer(BaseAnswer):
     answer_type: AnswerType = AnswerType.OBJECT_2D
     box: List[float]  # Format: [x1, y1, x2, y2]
     score: float
+    object_id: str
     prompt: Optional[str] = None
 
     @classmethod
@@ -21,6 +22,7 @@ class Object2DAnswer(BaseAnswer):
         box = data["box"]
         score = data.get("score", 1.0)
         prompt = data.get("prompt", None)
+        object_id = data.get("object_id", None)
         return cls(box=box, score=score, prompt=prompt)
 
     @classmethod
@@ -30,6 +32,7 @@ class Object2DAnswer(BaseAnswer):
         box = data["box"]
         score = data.get("score", 1.0)
         prompt = data.get("prompt", None)
+        object_id = data.get("object_id", None)
         return cls(box=box, score=score, prompt=prompt)
 
     @classmethod
@@ -37,7 +40,8 @@ class Object2DAnswer(BaseAnswer):
         """Parse an object detection result from dict."""
         box = data["box"]
         score = data.get("score", 1.0)
-        return cls(box=box, score=score)
+        object_id = data.get("object_id", None)
+        return cls(box=box, score=score, object_id=object_id)
 
     def to_json(self):
         return json.dumps(
@@ -45,6 +49,7 @@ class Object2DAnswer(BaseAnswer):
                 box=self.box,
                 score=self.score,
                 prompt=self.prompt,
+                object_id=self.object_id,
                 answer_type=str(self.answer_type),
             )
         )

@@ -1,5 +1,5 @@
 # Import the necessary utilities first
-from waymovqa.prompts import register_prompt_generator
+from waymovqa.prompt_generators import register_prompt_generator
 
 # Then import your modules
 from .grounding_2d import Grounding2DPromptGenerator

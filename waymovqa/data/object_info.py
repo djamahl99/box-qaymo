@@ -127,16 +127,18 @@ class ObjectInfo(DataObject):
         """Project 3D object to 2D image."""
         pose_matrix = np.array(frame_info.pose)
 
+        box = self.camera_synced_box if self.camera_synced_box is not None else self.box
+
         box_coords = np.array(
             [
                 [
-                    self.box["center_x"],
-                    self.box["center_y"],
-                    self.box["center_z"],
-                    self.box["length"],
-                    self.box["width"],
-                    self.box["height"],
-                    self.box["heading"],
+                    box["center_x"],
+                    box["center_y"],
+                    box["center_z"],
+                    box["length"],
+                    box["width"],
+                    box["height"],
+                    box["heading"],
                 ]
             ]
         )
@@ -151,14 +153,6 @@ class ObjectInfo(DataObject):
         image_metadata = np.array(frame_info.pose).reshape(-1).tolist()
 
         # Find camera info from scene if needed
-        # TODO: fix waymo_extract.py to have this information under a single source
-        camera_info_scene = None
-        if scene_info:
-            for cam in scene_info.camera_calibrations:
-                if cam.name == camera_info.name:
-                    camera_info_scene = cam
-                    break
-
         camera_info_frame = None
         if frame_info:
             for cam in frame_info.cameras:
@@ -166,14 +160,11 @@ class ObjectInfo(DataObject):
                     camera_info_frame = cam
                     break
 
-        # for name, cam_info in [('cam_info', camera_info), ('camera_info_scene', camera_info_scene), ('camera_info_frame', camera_info_frame)]:
-            # print(f'{name}.width, {name}.height, {name}.rolling_shutter_direction', cam_info.width, cam_info.height, cam_info.rolling_shutter_direction)
-
         metadata = list(
             [
-                camera_info_scene.width,
-                camera_info_scene.height,
-                camera_info_scene.rolling_shutter_direction,
+                camera_info_frame.width,
+                camera_info_frame.height,
+                camera_info_frame.rolling_shutter_direction,
             ]
         )
 
@@ -191,9 +182,7 @@ class ObjectInfo(DataObject):
         image_metadata.append(camera_info_frame.camera_trigger_time)
         image_metadata.append(camera_info_frame.camera_readout_done_time)
 
-        extrinsic, intrinsic = camera_info_frame.extrinsic, camera_info_scene.intrinsic
-        extrinsic = camera_info_scene.extrinsic if extrinsic is None else extrinsic
-        intrinsic = camera_info_scene.intrinsic if intrinsic is None else intrinsic
+        extrinsic, intrinsic = camera_info_frame.extrinsic, camera_info_frame.intrinsic
 
         assert intrinsic is not None and extrinsic is not None
 
@@ -231,3 +220,14 @@ class ObjectInfo(DataObject):
         """Add a camera to the list of cameras where this object is visible."""
         if camera_name and camera_name not in self.visible_cameras:
             self.visible_cameras.append(camera_name)
+
+    def __repr__(self) -> str:
+        text = f'Object #{self.id} timestamp={self.timestamp}'
+
+        if self.cvat_label is not None:
+            text += f" {self.cvat_label}\n"
+        
+        text += 'Frames: ' + ','.join(map(str, self.frames))
+        text += 'Visible Cameras: ' + ','.join(self.visible_cameras)
+
+        return text
