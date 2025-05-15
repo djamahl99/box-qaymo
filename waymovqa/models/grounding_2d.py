@@ -4,7 +4,7 @@ from pathlib import Path
 import json
 
 from waymovqa.models.base import BaseModel
-from waymovqa.questions.single_image import SingleImageQuestion
+from waymovqa.questions.single_image_single_object import SingleImageSingleObjectQuestion
 from waymovqa.answers.object_2d import Object2DAnswer
 from waymovqa.metrics.coco import COCOMetric
 
@@ -12,7 +12,7 @@ class Grounding2DModel(ABC):
     @property
     @abstractmethod
     def question_type(self):
-        return SingleImageQuestion
+        return SingleImageSingleObjectQuestion
 
     @property
     @abstractmethod

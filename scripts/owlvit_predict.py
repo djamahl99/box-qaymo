@@ -24,7 +24,7 @@ from transformers import (
 )
 
 from waymovqa.data.vqa_dataset import VQADataset
-from waymovqa.questions.single_image import SingleImageQuestion
+from waymovqa.questions.single_image_single_object import SingleImageSingleObjectQuestion
 from waymovqa.answers.object_2d import Object2DAnswer
 from waymovqa.answers.multi_object_2d import MultiObject2DAnswer
 from waymovqa.metrics.coco import COCOEvaluator
@@ -560,7 +560,7 @@ def convert_dataset(dataset: VQADataset, dataset_path: Path):
     questions = []
 
     for question, answer in dataset.samples:
-        assert isinstance(question, SingleImageQuestion) and isinstance(
+        assert isinstance(question, SingleImageSingleObjectQuestion) and isinstance(
             answer, Object2DAnswer
         )
 

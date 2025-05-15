@@ -13,10 +13,11 @@ import numpy as np
 # Define prediction and ground truth format types
 class QuestionType(str, Enum):
     SINGLE_IMAGE = "single_image"
-    MULTI_PROMPT_SINGLE_IMAGE = "multi_prompt_single_image"
-    MULTI_IMAGE = "multi_image"
+    SINGLE_IMAGE_MULTI_PROMPT = "single_image_multi_prompt"
+    SINGLE_IMAGE_MULTI_CHOICE = "single_image_multi_choice"
     MULTI_IMAGE_LIDAR = "multi_image_lidar"
-    MULTI_CHOICE_SINGLE_IMAGE = "multi_choice_single_image"
+    MULTI_IMAGE = "multi_image"
+    MULTI_IMAGE_SINGLE_OBJECT = "multi_image_single_object" 
 
 
 # Base models for different question types

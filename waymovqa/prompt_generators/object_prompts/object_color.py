@@ -8,7 +8,7 @@ from collections import defaultdict
 from abc import ABC, abstractmethod
 
 from waymovqa.answers.multiple_choice import MultipleChoiceAnswer
-from waymovqa.questions.single_image import SingleImageQuestion
+from waymovqa.questions.single_image_single_object import SingleImageSingleObjectQuestion
 from waymovqa.data.scene_info import SceneInfo
 from waymovqa.data.object_info import ObjectInfo
 from waymovqa.data.frame_info import FrameInfo
@@ -27,7 +27,7 @@ class ObjectColorPromptGenerator(BasePromptGenerator):
 
     def generate(
         self, scene: SceneInfo, objects: List[ObjectInfo], frame: FrameInfo = None
-    ) -> List[Tuple[SingleImageQuestion, MultipleChoiceAnswer]]:
+    ) -> List[Tuple[SingleImageSingleObjectQuestion, MultipleChoiceAnswer]]:
         """Generate color-based questions."""
         samples = []
 
@@ -54,23 +54,15 @@ class ObjectColorPromptGenerator(BasePromptGenerator):
 
             # Get scene camera
             camera = None
-            for cam in scene.camera_calibrations:
+            for cam in frame.images:
                 if cam.name == camera_name:
                     camera = cam
                     break
 
-            # Choose timestamp to focus on if frame not provided
-            if frame:
-                timestamp = frame.timestamp
-            elif colored_objects and colored_objects[0].frames:
-                timestamp = random.choice(colored_objects[0].frames)
-            else:
-                return []
-
             if obj.cvat_label and obj.cvat_color and camera is not None:
                 question = f"What color is the {obj.cvat_label.lower()}?"  # TODO: add more specific prompt?
 
-                question = SingleImageQuestion(
+                question = SingleImageSingleObjectQuestion(
                     image_path=camera.image_path,
                     question=question,
                     object_id=obj.id,

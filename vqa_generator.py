@@ -60,39 +60,7 @@ class VQAGenerator:
         """Find scenes to sample from."""
         return self.loader.get_scene_ids()
 
-    def find_scene_objects(self, scene_id: str) -> List[ObjectInfo]:
-        """Find all ObjectInfo for a scene."""
-        # First try to load from scene object table
-        try:
-            object_table = self.loader.load_scene_object_table(scene_id)
-            if object_table:
-                # Convert table entries to ObjectInfo objects
-                objects = []
-                for entry in object_table:
-                    try:
-                        obj = self.loader.load_object(entry["id"], scene_id)
-                        objects.append(obj)
-                    except FileNotFoundError:
-                        continue
-                return objects
-        except (FileNotFoundError, json.JSONDecodeError):
-            pass
-            
-        # Fallback: load objects by scanning object_infos directory
-        object_pattern = f"object_*_{scene_id}.json"
-        object_files = list(self.loader.object_infos_path.glob(object_pattern))
-        
-        objects = []
-        for obj_file in object_files:
-            try:
-                obj = ObjectInfo.load(obj_file)
-                objects.append(obj)
-            except (json.JSONDecodeError, KeyError):
-                continue
-                
-        return objects
-
-    def generate_dataset_scene_based(self, questions_per_scene: int = 5) -> List[Dict[str, Any]]:
+    def generate_dataset_scene_based(self, questions_per_scene: int = 5):
         """
         Generate VQA dataset based on scenes.
 
@@ -102,9 +70,38 @@ class VQAGenerator:
         Returns:
             List of VQA samples
         """
-        raise NotImplementedError()
+        scene_ids = self.loader.get_scene_ids()
+        
+        for scene_id in scene_ids:
+            # Load scene
+            scene = self.loader.load_scene(scene_id)
 
-    def generate_dataset_object_based(self, total_samples: int = 500) -> List[Dict[str, Any]]:
+            scene_samples = []
+
+            # Sample a random timestamp
+            timestamps = self.loader.get_frame_timestamps(scene_id)
+
+            # print('timestamps', timestamps)
+
+            # Sample a frame for this scene
+            sampled_timestamps = random.sample(timestamps, min(questions_per_scene, len(timestamps)))
+
+            for timestamp in sampled_timestamps:
+                frame = self.loader.load_frame(scene_id, timestamp)
+
+                # Generate samples
+                for generator in self.prompt_generators:
+                    samples = generator.generate(scene, [], frame)
+
+                    scene_samples.extend(samples)
+
+            # Sample from questions for this scene
+            subsamples = random.sample(scene_samples, min(questions_per_scene, len(scene_samples)))
+
+            for sample in subsamples:
+                self.dataset.add_sample(*sample)
+        
+    def generate_dataset_object_based(self, total_samples: int = 500):
         """
         Generate VQA dataset by sampling objects.
 

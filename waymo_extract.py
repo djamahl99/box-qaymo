@@ -90,8 +90,9 @@ def convert_frame_to_dict(
     frame_info["scene_id"] = scene_id
     frame_info["timestamp"] = timestamp
     frame_info["time_of_day"] = frame.context.stats.time_of_day
-    frame_info["weather"] = frame.context.stats.time_of_day
+    frame_info["weather"] = frame.context.stats.weather
     frame_info["location"] = frame.context.stats.location
+    
     frame_info["pose"] = np.reshape(
         np.array(frame.pose.transform, np.float32), (4, 4)
     ).tolist()
@@ -641,6 +642,9 @@ def process_tfrecord(
                     objectid_to_label,
                     objectid_to_color,
                 )
+
+                if frame_idx == 0:
+                    print("frame.context.stats.location", frame.context.stats.location)
 
                 frame_idx += 1
             except StopIteration:

@@ -9,8 +9,8 @@ class PromptEntry(BaseModel):
     object_ids: List[str]  # Object(s) relevant to this prompt
     answers: List[BaseAnswer] 
 
-class MultiPromptSingleImageQuestion(BaseQuestion):
-    question_type: QuestionType = QuestionType.MULTI_PROMPT_SINGLE_IMAGE
+class SingleImageMultiplePromptQuestion(BaseQuestion):
+    question_type: QuestionType = QuestionType.SINGLE_IMAGE_MULTI_PROMPT
     image_path: str
     scene_id: str
     timestamp: float

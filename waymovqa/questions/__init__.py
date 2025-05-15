@@ -2,14 +2,20 @@ import json
 from typing import Dict
 
 from .base import QuestionType, BaseQuestion
-from .single_image import SingleImageQuestion
+from .single_image_single_object import SingleImageSingleObjectQuestion
+from .single_image_multi_prompt import SingleImageMultiplePromptQuestion
+from .single_image_multi_choice import SingleImageMultipleChoiceQuestion
 from .multi_image import MultipleImageQuestion
-from .multi_prompt_single_image import MultiPromptSingleImageQuestion
+from .multi_image_single_object import MultipleImageSingleObject
 
 QUESTION_TYPE_REGISTRY = {
-    QuestionType.SINGLE_IMAGE: SingleImageQuestion,
+    QuestionType.SINGLE_IMAGE: SingleImageSingleObjectQuestion,
+    QuestionType.SINGLE_IMAGE_MULTI_PROMPT: SingleImageMultiplePromptQuestion,
+    QuestionType.SINGLE_IMAGE_MULTI_CHOICE: SingleImageMultipleChoiceQuestion,
+    # QuestionType.MULTI_IMAGE_LIDAR: ,
+
     QuestionType.MULTI_IMAGE: MultipleImageQuestion,
-    QuestionType.MULTI_PROMPT_SINGLE_IMAGE: MultiPromptSingleImageQuestion
+    QuestionType.MULTI_IMAGE_SINGLE_OBJECT: MultipleImageSingleObject
 }
 
 def question_from_json(text: str) -> BaseQuestion:

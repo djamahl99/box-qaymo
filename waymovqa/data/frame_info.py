@@ -1,16 +1,37 @@
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Union, Tuple
 import json
-import numpy as np
-import cv2
+from enum import Enum
 
 from waymovqa.data.base import DataObject
 from waymovqa.data.object_info import ObjectInfo
 from waymovqa.data.camera_info import CameraInfo
 from waymovqa.data.laser_info import LaserInfo
 
+class WeatherType(str, Enum):
+    RAINY = "rainy"
+    SUNNY = "sunny"
+
+class LocationType(str, Enum):
+    SAN_FRANCISCO = "location_sf"
+    PHOENIX = "location_phx"
+    MOUNTAIN_VIEW = "location_mtv"
+    LOS_ANGELES = "location_la"
+    DETROIT = "location_det"
+    SEATTLE = "location_sea"
+    CHANDLER = "location_chd"  # Chandler, AZ
+    OTHER = "location_other"
+
+class TimeOfDayType(str, Enum):
+    DAY = "Day"
+    DAWN_DUSK = "Dawn/Dusk"
+    NIGHT = "Night"
+
 class FrameInfo(DataObject):
     """Frame information."""
+    weather: Optional[WeatherType]
+    location: Optional[LocationType]
+    time_of_day: Optional[TimeOfDayType]
 
     def __init__(self, scene_id: str, timestamp: int):
         super().__init__(scene_id)
@@ -75,9 +96,21 @@ class FrameInfo(DataObject):
         frame.range_image_top_pose = data.get("range_image_top_pose")
         frame.camera_projections = data.get("camera_projections", {})
 
-        frame.time_of_day = data.get("time_of_day", None)
-        frame.location = data.get("location", None)
-        frame.weather = data.get("weather", None)
+        time_of_day_str = data.get("time_of_day")
+        if time_of_day_str:
+            frame.time_of_day = TimeOfDayType(time_of_day_str)
+        
+        weather_str = data.get("weather")
+        if weather_str:
+            try:
+                frame.weather = WeatherType(weather_str)
+            except ValueError:
+                # probably because waymo_extract bug
+                frame.weather = None
+
+        location_str = data.get("location")
+        if location_str:
+            frame.location = LocationType(location_str)
 
         return frame
 

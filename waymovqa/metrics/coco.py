@@ -13,7 +13,7 @@ import cv2
 
 from torchvision.ops import box_iou
 
-from waymovqa.questions.single_image import SingleImageQuestion
+from waymovqa.questions.single_image_single_object import SingleImageSingleObjectQuestion
 
 from .base import BaseMetric
 from waymovqa.answers.object_2d import Object2DAnswer
@@ -189,14 +189,14 @@ class COCOMetric(BaseMetric[Object2DAnswer]):
         
         return metrics
 
-    def evaluate(self, prediction: Object2DAnswer, ground_truth: Object2DAnswer, question: SingleImageQuestion) -> Dict[str, float]:
+    def evaluate(self, prediction: Object2DAnswer, ground_truth: Object2DAnswer, question: SingleImageSingleObjectQuestion) -> Dict[str, float]:
         """
         Evaluate a single prediction against a single ground truth.
         
         Args:
             prediction: Object2DAnswer prediction
             ground_truth: Object2DAnswer ground truth
-            question: SingleImageQuestion
+            question: SingleImageSingleObjectQuestion
 
         Returns:
             Dictionary with IoU and match indicator
@@ -285,14 +285,14 @@ class COCOMetric(BaseMetric[Object2DAnswer]):
 
         return self.evaluate_multi(pred_multi, gt_multi, question)
 
-    def vis_multi(self, predictions: MultiObject2DAnswer, ground_truths: MultiObject2DAnswer, question: SingleImageQuestion) -> None:
+    def vis_multi(self, predictions: MultiObject2DAnswer, ground_truths: MultiObject2DAnswer, question: SingleImageSingleObjectQuestion) -> None:
         """
         Visualize multiple predictions and ground truths.
         
         Args:
             predictions: MultiObject2DAnswer with multiple predicted boxes
             ground_truths: MultiObject2DAnswer with multiple ground truth boxes
-            question: SingleImageQuestion
+            question: SingleImageSingleObjectQuestion
         """
         try:
             img_path = self.dataset_path / question.image_path
@@ -351,14 +351,14 @@ class COCOMetric(BaseMetric[Object2DAnswer]):
         except Exception as e:
             print(f"Visualization error: {e}")
 
-    def evaluate_multi(self, predictions: MultiObject2DAnswer, ground_truths: MultiObject2DAnswer, question: SingleImageQuestion) -> Dict:
+    def evaluate_multi(self, predictions: MultiObject2DAnswer, ground_truths: MultiObject2DAnswer, question: SingleImageSingleObjectQuestion) -> Dict:
         """
         Evaluate multiple predictions against multiple ground truths.
         
         Args:
             predictions: MultiObject2DAnswer with multiple predicted boxes
             ground_truths: MultiObject2DAnswer with multiple ground truth boxes
-            question: SingleImageQuestion
+            question: SingleImageSingleObjectQuestion
             
         Returns:
             Dictionary with evaluation metrics

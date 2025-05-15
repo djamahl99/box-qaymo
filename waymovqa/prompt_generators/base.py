@@ -10,8 +10,8 @@ from waymovqa.answers import BaseAnswer
 from waymovqa.questions import BaseQuestion
 
 # Update BasePromptGenerator with typing information
-TQ = TypeVar("T", bound=BaseAnswer)
-TA = TypeVar("T", bound=BaseQuestion)
+TQ = TypeVar("TQ", bound=BaseAnswer)
+TA = TypeVar("TA", bound=BaseQuestion)
 
 
 class BasePromptGenerator(Generic[TQ], ABC):
@@ -25,7 +25,7 @@ class BasePromptGenerator(Generic[TQ], ABC):
         pass
 
     @abstractmethod
-    def get_metric_class(self) -> str:
+    def get_metric_class(self) -> type:
         """Return the name of the metric class to use for evaluation."""
         pass
 
@@ -37,4 +37,9 @@ class BasePromptGenerator(Generic[TQ], ABC):
     @abstractmethod
     def get_answer_type(self) -> Type[TA]:
         """Return the answer type class used by this generator."""
+        pass
+
+    @abstractmethod
+    def get_supported_methods(self) -> List[str]:
+        """Return the supported generation methods."""
         pass
