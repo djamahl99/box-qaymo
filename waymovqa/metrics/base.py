@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Union, Type, TypeVar, Generic, Optional, Tuple
 from waymovqa.answers.base import BaseAnswer  
+from waymovqa.data.vqa_dataset import VQADataset
 from waymovqa.questions.base import BaseQuestion
 
 # Define type variable for answer types
@@ -19,6 +20,28 @@ class BaseMetric(Generic[T], ABC):
         """
         self.answer_type = answer_type
    
+    def evaluate_dataset(self, pred_dataset: VQADataset, gt_dataset: VQADataset) -> Dict[str, Any]:
+        predictions = [x.answer for x in pred_dataset.samples]
+        ground_truths = [x.answer for x in gt_dataset.samples]
+
+        # get the questions from both pred / gt to check they are matching
+        questions0 = [x.question for x in pred_dataset.samples]
+        questions1 = [x.question for x in gt_dataset.samples]
+        questions = questions0
+
+        assert all([questions0[i] == questions1[i] for i in range(len(questions0))]) and len(
+            questions0
+        ) == len(questions1)
+
+        results = []
+
+        for pred, gt, question in zip(predictions, ground_truths, questions):
+            # Evaluate the prediction
+            result = self.evaluate(pred, gt, question)
+            results.append(result)
+
+        return self.summarise(results)
+
     @abstractmethod
     def summarise(self, metric_results: List[Dict]) -> Dict[str, Any]:
         """
@@ -34,13 +57,14 @@ class BaseMetric(Generic[T], ABC):
         pass
     
     @abstractmethod
-    def evaluate(self, prediction: T, ground_truth: T) -> Dict[str, Any]:
+    def evaluate(self, prediction: T, ground_truth: T, question) -> Dict[str, Any]:
         """
         Evaluate a single prediction against ground truth.
         
         Args:
             prediction: The prediction to evaluate
             ground_truth: The ground truth to compare against
+            question: The question being asked - might have critical information for eval.
             
         Returns:
             A dictionary with evaluation metrics.
@@ -66,25 +90,3 @@ class BaseMetric(Generic[T], ABC):
         if not isinstance(ground_truth, self.answer_type):
             raise TypeError(f"Ground truth must be of type {self.answer_type.__name__}, got {type(ground_truth).__name__}")
         return prediction, ground_truth
-    
-    def batch_evaluate(self, predictions: List[T], ground_truths: List[T]) -> Dict[str, Any]:
-        """
-        Evaluate a batch of predictions against ground truths.
-        
-        Args:
-            predictions: List of predictions to evaluate
-            ground_truths: List of ground truths to compare against
-            
-        Returns:
-            A dictionary with summarized evaluation metrics.
-        """
-        if len(predictions) != len(ground_truths):
-            raise ValueError(f"Number of predictions ({len(predictions)}) does not match number of ground truths ({len(ground_truths)})")
-        
-        metric_results = []
-        for pred, gt in zip(predictions, ground_truths):
-            validated_pred, validated_gt = self.validate_types(pred, gt)
-            result = self.evaluate(validated_pred, validated_gt)
-            metric_results.append(result)
-            
-        return self.summarise(metric_results)

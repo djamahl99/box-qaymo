@@ -5,10 +5,12 @@ from .base import AnswerType, BaseAnswer
 from .object_2d import Object2DAnswer
 from .multi_object_2d import MultiObject2DAnswer
 from .raw_text import RawTextAnswer
+from .multiple_choice import MultipleChoiceAnswer
 
 ANSWER_TYPE_REGISTRY = {
     AnswerType.OBJECT_2D: Object2DAnswer,
     AnswerType.MULTIPLE_OBJECT_2D: MultiObject2DAnswer,
+    AnswerType.MULTIPLE_CHOICE: MultipleChoiceAnswer,
     AnswerType.RAW_TEXT: RawTextAnswer
 }
 

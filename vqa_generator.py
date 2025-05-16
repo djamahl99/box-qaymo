@@ -15,6 +15,7 @@ from waymovqa.models import MODEL_REGISTRY
 from waymovqa.models.base import BaseModel
 
 from waymovqa.data.vqa_dataset import VQADataset
+from tqdm import tqdm
 
 class VQAGenerator:
     """Main class for generating VQA samples."""
@@ -60,7 +61,7 @@ class VQAGenerator:
         """Find scenes to sample from."""
         return self.loader.get_scene_ids()
 
-    def generate_dataset_scene_based(self, questions_per_scene: int = 5):
+    def generate_dataset_scene_based(self, questions_per_scene: int = 5, max_scenes: int = 5):
         """
         Generate VQA dataset based on scenes.
 
@@ -71,8 +72,10 @@ class VQAGenerator:
             List of VQA samples
         """
         scene_ids = self.loader.get_scene_ids()
+
+        scene_ids = random.sample(scene_ids, max_scenes)
         
-        for scene_id in scene_ids:
+        for scene_id in tqdm(scene_ids, desc="Generating questions for each scene"):
             # Load scene
             scene = self.loader.load_scene(scene_id)
 
@@ -194,7 +197,7 @@ class VQAGenerator:
             List of VQA samples
         """
         if method == "scene":
-            self.generate_dataset_scene_based(questions_per_scene)
+            self.generate_dataset_scene_based(questions_per_scene, max_scenes=total_samples//questions_per_scene)
         elif method == "object":
             self.generate_dataset_object_based(total_samples)
         elif method == "combined":

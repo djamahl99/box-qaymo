@@ -1,1 +1,4 @@
-from .scene_multi_choice_questions import SceneMultiChoicePromptGenerator
+from .scene_multi_choice import (
+    SceneSingleImageMultiChoicePromptGenerator,
+    SceneMultipleImageMultiChoicePromptGenerator,
+)

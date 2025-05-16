@@ -4,24 +4,17 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from typing import Dict, Tuple, Optional, List
-from argparse import ArgumentParser
 import torch
-from torch import nn
-from torchvision.ops import box_iou, nms
-import numpy as np
 from pathlib import Path
 from PIL import Image
 import pprint
+import re
 
-from transformers import pipeline
-from transformers.utils.constants import OPENAI_CLIP_MEAN, OPENAI_CLIP_STD
 
 from waymovqa.data.vqa_dataset import VQADataset
 from waymovqa.questions import *
-from waymovqa.answers.object_2d import Object2DAnswer
 from waymovqa.answers.multiple_choice import MultipleChoiceAnswer
 from waymovqa.metrics.multiple_choice import MultipleChoiceMetric
-from waymovqa.waymo_loader import WaymoDatasetLoader
 
 from transformers import AutoTokenizer
 import torch
@@ -214,16 +207,16 @@ def run_on_dataset(
         question = sample.question
         gt_answer = sample.answer
 
-        pprint.pp(question)
-
         image_path = str(dataset_path / question.image_path)
 
         if isinstance(question, SingleImageMultipleChoiceQuestion):
             text = question.question
-            choices_text = "\n".join(
-                [f"{i+1}. {choice}" for i, choice in enumerate(question.choices)]
-            )
-            prompt = f"{text}\nChoose the most appropriate answer from the following options:\n{choices_text}"
+            # choices_text = "\n".join(
+            #     [f"{i+1}. {choice}" for i, choice in enumerate(question.choices)]
+            # )
+            # prompt = f"{text}\nChoose the most appropriate answer from the following options:\n{choices_text}"
+
+            prompt = f'{question.question}\nRespond with only the full name of your selection (e.g., "{question.choices[0]}")..'
 
             batch_text_strs.append(prompt)
             batch_image_paths.append(image_path)
@@ -345,7 +338,14 @@ def process_batch(
                 stopping_criteria=[stopping_criteria],
             )
         
-        outputs = tokenizer.decode(output_ids[0, input_ids.shape[1]:]).strip()
+        # outputs = tokenizer.decode(output_ids[0, input_ids.shape[1]:])
+        outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
+
+        print(batch_text_strs[i])
+        print(f"OUTPUT:", outputs)
+        with open(f'raw_output_{i}.txt', 'w') as f:
+            f.write(outputs)
+
         responses.append(outputs)
 
     # The rest of your code for processing responses remains the same
@@ -381,24 +381,32 @@ def process_batch(
 def parse_multiple_choice_response(response: str, choices: List[str]) -> str:
     """
     Parse the LLaVA response to extract the chosen answer for multiple choice questions.
-    Looks for option numbers or exact matches of choice text.
     """
-    # First check if response contains a number that corresponds to a choice
-    for i, choice in enumerate(choices):
-        if (
-            f"{i+1}" in response
-            or f"option {i+1}" in response.lower()
-            or f"choice {i+1}" in response.lower()
-        ):
-            return choice
-
-    # Then look for exact match of choice text
-    for choice in choices:
-        if choice.lower() in response.lower():
-            return choice
-
-    # If no clear match, return the choice with highest text similarity
-    return max(choices, key=lambda x: compute_text_similarity(x, response))
+    response = response.lower().strip()
+    normalized_choices = [choice.lower() for choice in choices]
+    
+    # Check for exact phrase matches first (most reliable)
+    for i, choice in enumerate(normalized_choices):
+        pattern = f"(^|[^a-z0-9])(option|choice|answer)?\s*{i+1}([^a-z0-9]|$)"
+        if re.search(pattern, response):
+            return choices[i]
+    
+    # Check for exact choice text
+    for i, choice in enumerate(normalized_choices):
+        if re.search(f"(^|[^a-z0-9]){re.escape(choice)}([^a-z0-9]|$)", response):
+            return choices[i]
+    
+    # Check for partial matches, sorted by length (longest first to avoid substring issues)
+    sorted_choices = sorted(range(len(choices)), key=lambda i: len(normalized_choices[i]), reverse=True)
+    for i in sorted_choices:
+        if normalized_choices[i] in response:
+            return choices[i]
+    
+    # Fallback to similarity for truly ambiguous cases
+    if compute_text_similarity:  # Assuming this function exists
+        return max(choices, key=lambda x: compute_text_similarity(x.lower(), response))
+    
+    return "AMBIGUOUS_RESPONSE"
 
 
 def determine_best_answer_from_prompts(responses: List[str], choices: List[str]) -> str:
@@ -494,21 +502,23 @@ def main():
         pred_dataset = VQADataset.load_dataset(str(save_path))
 
     # evaluate?
-    eval = MultipleChoiceMetric(dataset_path)
+    metric = MultipleChoiceMetric()
 
-    predictions = [x[1] for x in pred_dataset.samples]
-    ground_truths = [x[1] for x in gt_dataset.samples]
+    pprint.pprint(metric.evaluate_dataset(pred_dataset, gt_dataset))
 
-    # get the questions from both pred / gt to check they are matching
-    prompts0 = [x[0].question for x in pred_dataset.samples]
-    prompts1 = [x[0].question for x in gt_dataset.samples]
-    questions = [x[0] for x in gt_dataset.samples]
+    # predictions = [x.answer for x in pred_dataset.samples]
+    # ground_truths = [x.answer for x in gt_dataset.samples]
 
-    assert all([prompts0[i] == prompts1[i] for i in range(len(prompts0))]) and len(
-        prompts0
-    ) == len(prompts1)
+    # # get the questions from both pred / gt to check they are matching
+    # questions0 = [x.question for x in pred_dataset.samples]
+    # questions1 = [x.question for x in gt_dataset.samples]
+    # questions = questions0
 
-    pprint.pprint(eval.evaluate(predictions, ground_truths, questions))
+    # assert all([questions0[i] == questions1[i] for i in range(len(questions0))]) and len(
+    #     questions0
+    # ) == len(questions1)
+
+    # pprint.pprint(metric.evaluate(predictions, ground_truths, questions))
 
 
 if __name__ == "__main__":

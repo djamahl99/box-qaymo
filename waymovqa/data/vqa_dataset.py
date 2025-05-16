@@ -5,6 +5,8 @@ from waymovqa.answers import answer_from_dict, answer_from_json
 from waymovqa.questions import question_from_dict, question_from_json
 from waymovqa.questions.base import BaseQuestion
 
+import pprint
+
 from pydantic import BaseModel
 
 import json

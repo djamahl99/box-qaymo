@@ -10,14 +10,14 @@ from waymovqa.data.frame_info import FrameInfo, TimeOfDayType, WeatherType, Loca
 from waymovqa.data.object_info import ObjectInfo
 from waymovqa.prompt_generators import BasePromptGenerator, register_prompt_generator
 
-from waymovqa.questions.multi_image import MultipleImageQuestion
+from waymovqa.questions.multi_image_multi_choice import MultipleImageMultipleChoiceQuestion
+from waymovqa.questions.single_image_multi_choice import SingleImageMultipleChoiceQuestion
+from waymovqa.questions.base import BaseQuestion
 from waymovqa.answers.multiple_choice import MultipleChoiceAnswer
 from waymovqa.metrics.multiple_choice import MultipleChoiceMetric
 from waymovqa.metrics.base import BaseMetric
 
-
-@register_prompt_generator
-class SceneMultiChoicePromptGenerator(BasePromptGenerator):
+class BaseSceneChoicePromptGenerator(BasePromptGenerator):
     """Generates questions about overall scene description."""
 
     QUESTION_CONFIGS = [
@@ -61,15 +61,8 @@ class SceneMultiChoicePromptGenerator(BasePromptGenerator):
         utc_dt = datetime.fromtimestamp(timestamp_seconds, tz=pytz.UTC)
         local_tz = pytz.timezone(timezone_str)
         local_dt = utc_dt.astimezone(local_tz)
-
-        # Debug info
-        print('UTC datetime:', utc_dt)
-        print('Local datetime:', local_dt)
-        print('Local hour:', local_dt.hour)
         
         hour = local_dt.hour
-
-        print('hour', hour)
         
         # Determine the time period
         if 5 <= hour < 8:
@@ -85,9 +78,9 @@ class SceneMultiChoicePromptGenerator(BasePromptGenerator):
         else:
             return "Night (8 PM-5 AM)"
 
-    def generate(
+    def _generate_prompts(
         self, scene: SceneInfo, objects: List[ObjectInfo], frame: FrameInfo = None
-    ) -> List[Tuple[MultipleImageQuestion, MultipleChoiceAnswer]]:
+    ):
         """Generate scene description questions."""
         assert frame is not None # really need the frame for weather/time_of_day
         
@@ -115,21 +108,21 @@ class SceneMultiChoicePromptGenerator(BasePromptGenerator):
                 continue
             
             # Format options for the question text
-            formatted_options = ' '.join(options[:-1]) + ' or ' + options[-1]
+            formatted_options = ', '.join(options[:-1]) + ' or ' + options[-1]
             
             # Create the question with formatted options
             question = question_template.format(formatted_options)
             
             # Create and append the question-answer pair
             samples.append((
-                MultipleImageQuestion(
+                dict(
                     image_paths=[cam.image_path for cam in frame.cameras],
                     question=question,
                     camera_names=[cam.name for cam in frame.cameras],
                     scene_id=frame.scene_id,
                     timestamp=frame.timestamp
                 ),
-                MultipleChoiceAnswer(
+                dict(
                     choices=options,
                     answer=answer
                 )
@@ -140,15 +133,16 @@ class SceneMultiChoicePromptGenerator(BasePromptGenerator):
         
         # Create the detailed time period question
         samples.append((
-            MultipleImageQuestion(
+            dict(
                 image_paths=[cam.image_path for cam in frame.cameras],
-                question="What time of day does this scene appear to be from out of " + 
-                         ' '.join(self.DETAILED_TIME_PERIODS[:-1]) + ' or ' + self.DETAILED_TIME_PERIODS[-1] + "?",
+                question="What time of day does this scene appear to be from out of: " + 
+                         ', '.join(self.DETAILED_TIME_PERIODS[:-1]) + ' or ' + self.DETAILED_TIME_PERIODS[-1] + "?",
                 scene_id=frame.scene_id,
                 timestamp=frame.timestamp,
-                camera_names=[cam.name for cam in frame.cameras]
+                camera_names=[cam.name for cam in frame.cameras],
+
             ),
-            MultipleChoiceAnswer(
+            dict(
                 choices=self.DETAILED_TIME_PERIODS,
                 answer=detailed_time_period
             )
@@ -157,7 +151,7 @@ class SceneMultiChoicePromptGenerator(BasePromptGenerator):
         return samples
     
     def get_question_type(self):
-        return MultipleImageQuestion
+        return BaseQuestion
 
     def get_answer_type(self):
         return MultipleChoiceAnswer
@@ -167,3 +161,71 @@ class SceneMultiChoicePromptGenerator(BasePromptGenerator):
 
     def get_supported_methods(self):
         return ['scene', 'frame']
+
+@register_prompt_generator
+class SceneMultipleImageMultiChoicePromptGenerator(BaseSceneChoicePromptGenerator):
+    """Generates multi-image questions."""
+    
+    def generate(self, scene, objects, frame=None):
+        # Multi-image specific implementation
+        samples = self._generate_prompts(scene, objects, frame)
+
+        samples_parsed = []
+        for question, answer in samples:
+            samples_parsed.append((
+                MultipleImageMultipleChoiceQuestion(
+                    image_paths=question['image_paths'],
+                    question=question['question'],
+                    choices=answer['choices'],
+                    camera_names=question['camera_names'],
+                    scene_id=question['scene_id'],
+                    timestamp=question['timestamp']
+                ),
+                MultipleChoiceAnswer(
+                    choices=answer['choices'],
+                    answer=answer['answer']
+                )
+            ))
+
+        return samples_parsed
+
+    def get_question_type(self):
+        return MultipleImageMultipleChoiceQuestion
+
+@register_prompt_generator
+class SceneSingleImageMultiChoicePromptGenerator(BaseSceneChoicePromptGenerator):
+    """Generates single-image questions."""
+    
+    def generate(self, scene, objects, frame=None):
+        # Multi-image specific implementation
+        samples = self._generate_prompts(scene, objects, frame)
+
+        samples_parsed = []
+        for question, answer in samples:
+            image_paths, camera_names = question['image_paths'], question['camera_names']
+
+            # TODO: change from constant FRONT
+            idx = camera_names.index('FRONT')
+
+            image_path = image_paths[idx]
+            camera_name = camera_names[idx]
+
+            samples_parsed.append((
+                SingleImageMultipleChoiceQuestion(
+                    image_path=image_path,
+                    question=question['question'],
+                    choices=answer['choices'],
+                    camera_name=camera_name,
+                    scene_id=question['scene_id'],
+                    timestamp=question['timestamp']
+                ),
+                MultipleChoiceAnswer(
+                    choices=answer['choices'],
+                    answer=answer['answer']
+                )
+            ))
+
+        return samples_parsed
+    
+    def get_question_type(self):
+        return SingleImageMultipleChoiceQuestion

@@ -13,9 +13,6 @@ if TYPE_CHECKING:
     from waymovqa.data.camera_info import CameraInfo
     from waymovqa.data.scene_info import SceneInfo
 
-from waymo_open_dataset.wdl_limited.camera.ops import py_camera_model_ops
-from waymo_open_dataset.utils import box_utils
-
 
 class ObjectInfo(DataObject):
     """3D object information."""
@@ -124,7 +121,15 @@ class ObjectInfo(DataObject):
         scene_info: "SceneInfo" = None,
         return_depth: bool = True,
     ) -> Optional[Dict[str, Any]]:
-        """Project 3D object to 2D image."""
+        """Project 3D object to 2D image.
+        
+        Note: waymo_open_dataset is imported inside this function to allow
+        partial functionality when running in environments where the package
+        is not available.
+        """
+        from waymo_open_dataset.wdl_limited.camera.ops import py_camera_model_ops
+        from waymo_open_dataset.utils import box_utils
+        
         pose_matrix = np.array(frame_info.pose)
 
         box = self.camera_synced_box if self.camera_synced_box is not None else self.box

@@ -54,6 +54,7 @@ python vqa_generator.py --dataset_path /media/local-data/uqdetche/waymo_vqa --ge
 VLMs?
 1. OWLViT
 2. Grounding DINO
+3. LLAVA
 
  - we can evaluate these as 2d grounding models
 
