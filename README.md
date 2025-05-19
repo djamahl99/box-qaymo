@@ -46,15 +46,16 @@ python vqa_generator.py --dataset_path /media/local-data/uqdetche/waymo_vqa --ge
 
 ### Models to Evaluate
 
-1. SENNA
+1. SENNA - zeroshot and finetune (for one task)
 2. Language Prompt for Autonomous Driving https://github.com/wudongming97/Prompt4Driving
 3. https://github.com/ThierryDeruyttere/vilbert-Talk2car
-4. 
+4. AlphaDrive
 
 VLMs?
 1. OWLViT
 2. Grounding DINO
 3. LLAVA
+4. QwenVL
 
  - we can evaluate these as 2d grounding models
 
