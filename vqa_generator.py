@@ -180,7 +180,7 @@ class VQAGenerator:
         subsamples = random.sample(all_samples, len(all_samples)) # can subsam
 
         for sample in subsamples:
-            print('sample', sample)
+            # print('sample', sample)
             self.dataset.add_sample(*sample)
 
     def generate_dataset(self, questions_per_scene: int = 5, total_samples: int = 500, 

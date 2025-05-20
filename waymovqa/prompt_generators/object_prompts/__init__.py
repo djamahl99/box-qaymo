@@ -6,3 +6,4 @@ from .grounding_2d import Grounding2DPromptGenerator
 from .object_color import *
 from .object_location import *
 from .object_relation import *
+from .object_drawn_box_prompt import ObjectDrawnBoxPromptGenerator

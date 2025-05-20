@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from waymovqa.data.scene_info import SceneInfo
 
 
+
 class ObjectInfo(DataObject):
     """3D object information."""
 
@@ -118,9 +119,8 @@ class ObjectInfo(DataObject):
         self,
         frame_info: "FrameInfo",
         camera_info: "CameraInfo",
-        scene_info: "SceneInfo" = None,
         return_depth: bool = True,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> np.ndarray:
         """Project 3D object to 2D image.
         
         Note: waymo_open_dataset is imported inside this function to allow

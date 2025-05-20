@@ -11,3 +11,12 @@ class SingleImageMultipleChoiceQuestion(BaseQuestion):
     scene_id: str
     timestamp: int
     camera_name: str
+    
+class SingleBase64ImageMultipleChoiceQuestion(BaseQuestion):
+    question_type: QuestionType = QuestionType.SINGLE_IMAGE
+    image_bas64: str
+    question: str
+    choices: List[str]
+    scene_id: str
+    timestamp: int
+    camera_name: str

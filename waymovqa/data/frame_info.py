@@ -78,6 +78,8 @@ class FrameInfo(DataObject):
         # Load camera data
         for img_data in data.get("images", []):
             camera = CameraInfo.from_dict(img_data)
+            if 'dataset_path' in data and not Path(camera.image_path).exists():
+                camera.image_path = str(Path(data['dataset_path']) / camera.image_path)
             frame.cameras.append(camera)
 
         # Load point cloud data

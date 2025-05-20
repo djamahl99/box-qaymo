@@ -35,6 +35,97 @@ class CameraInfo(DataObject):
         self.camera_trigger_time = None
         self.camera_readout_done_time = None
 
+    def project_to_camera_xyz(
+        self,
+        points: np.ndarray
+    ) -> np.ndarray:
+        # vehicle frame to camera sensor frame.
+        extrinsic = np.array(self.extrinsic).reshape((4, 4))
+        vehicle_to_sensor = extrinsic
+        points_hom = np.concatenate((points, np.ones_like(points[:, [0]])), axis=1)
+        points_camera_frame = points_hom @ vehicle_to_sensor
+        
+        return points_camera_frame[:, :3]
+
+    def project_to_image(
+        self,
+        points: np.ndarray,
+        frame_info: "FrameInfo",
+        camera_info: "CameraInfo",
+        return_depth: bool = True,
+    ) -> np.ndarray:
+        from waymo_open_dataset.wdl_limited.camera.ops import py_camera_model_ops
+        from waymo_open_dataset.utils import box_utils
+        
+        pose_matrix = np.array(frame_info.pose)
+        
+        homogeneous_points = np.hstack([points, np.ones((points.shape[0], 1))])
+        # Matrix multiplication
+        world_points_homogeneous = np.matmul(homogeneous_points, pose_matrix.T)
+        # Extract 3D coordinates
+        world_points = world_points_homogeneous[:, :3]
+
+        image_metadata = np.array(frame_info.pose).reshape(-1).tolist()
+
+        # Find camera info from scene if needed
+        camera_info_frame = None
+        if frame_info:
+            for cam in frame_info.cameras:
+                if cam.name == camera_info.name:
+                    camera_info_frame = cam
+                    break
+
+        metadata = list(
+            [
+                camera_info_frame.width,
+                camera_info_frame.height,
+                camera_info_frame.rolling_shutter_direction,
+            ]
+        )
+
+        velocity = camera_info_frame.velocity
+        image_metadata.append(velocity.get("v_x", 0))
+        image_metadata.append(velocity.get("v_y", 0))
+        image_metadata.append(velocity.get("v_z", 0))
+        image_metadata.append(velocity.get("w_x", 0))
+        image_metadata.append(velocity.get("w_y", 0))
+        image_metadata.append(velocity.get("w_z", 0))
+
+        # Get timing attributes with fallbacks
+        image_metadata.append(camera_info_frame.pose_timestamp)
+        image_metadata.append(camera_info_frame.shutter)
+        image_metadata.append(camera_info_frame.camera_trigger_time)
+        image_metadata.append(camera_info_frame.camera_readout_done_time)
+
+        extrinsic, intrinsic = camera_info_frame.extrinsic, camera_info_frame.intrinsic
+
+        assert intrinsic is not None and extrinsic is not None
+
+        extrinsic = np.array(extrinsic, dtype=np.float32).reshape(4, 4)
+        intrinsic = np.array(intrinsic, dtype=np.float32)
+
+        try:
+            return py_camera_model_ops.world_to_image(
+                extrinsic,
+                intrinsic,
+                metadata,
+                image_metadata,
+                world_points,
+                return_depth=return_depth,
+            ).numpy()
+        except ValueError as e:
+            print(
+                dict(
+                    extrinsic=extrinsic,
+                    intrinsic=intrinsic,
+                    metadata=metadata,
+                    image_metadata=image_metadata,
+                    world_points=world_points,
+                )
+            )
+
+            raise e
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert camera info to dictionary."""
         data = {

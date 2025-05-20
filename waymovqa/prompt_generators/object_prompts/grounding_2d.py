@@ -11,6 +11,7 @@ from waymovqa.data.object_info import ObjectInfo
 from waymovqa.data.frame_info import FrameInfo
 from waymovqa.data.camera_info import CameraInfo
 from waymovqa.data.laser_info import LaserInfo
+from waymovqa.data.visualise import draw_3d_wireframe_box_cv
 from waymovqa.metrics.coco import COCOMetric
 from waymovqa.prompt_generators.base import BasePromptGenerator
 from waymovqa.prompt_generators import register_prompt_generator
@@ -19,39 +20,6 @@ from waymovqa.questions import SingleImageSingleObjectQuestion, SingleImageMulti
 from waymovqa.questions.single_image_multi_prompt import PromptEntry
 
 MIN_OBJECT_SIZE = 32
-
-
-def draw_3d_wireframe_box_cv(img, u, v, color, thickness=3):
-    """Draws 3D wireframe bounding boxes onto the given image."""
-    # List of lines to interconnect. Allows for various forms of connectivity.
-    # Four lines each describe bottom face, top face, and vertical connectors.
-    lines = (
-        (0, 1),
-        (1, 2),
-        (2, 3),
-        (3, 0),
-        (4, 5),
-        (5, 6),
-        (6, 7),
-        (7, 4),
-        (0, 4),
-        (1, 5),
-        (2, 6),
-        (3, 7),
-    )
-
-    for point_idx1, point_idx2 in lines:
-
-        pt1 = (u[point_idx1], v[point_idx1])
-        pt2 = (u[point_idx2], v[point_idx2])
-
-        pt1 = tuple(map(int, pt1))
-        pt2 = tuple(map(int, pt2))
-
-        img = cv2.line(img, pt1, pt2, color, thickness, lineType=cv2.LINE_AA)
-
-    return img
-
 
 _DEBUG = True
 
@@ -105,13 +73,16 @@ class Grounding2DPromptGenerator(BasePromptGenerator):
                     if sum(ok) < 6 or min(depth) < 0:
                         continue
 
-                    width = max(u) - min(u)
-                    height = max(v) - min(v)
-                    if width < 32 or height < 32:
-                        continue
-
                     x_min, x_max = int(min(u)), int(max(u))
                     y_min, y_max = int(min(v)), int(max(v))
+
+                    x_min, x_max = [max(min(x, camera.width), 0) for x in [x_min, x_max]]
+                    y_min, y_max = [max(min(y, camera.height), 0) for y in [y_min, y_max]]
+
+                    width = x_max - x_min
+                    height = y_max - y_min
+                    if width < 32 or height < 32:
+                        continue
 
                     boxes.append([x_min, y_min, x_max, y_max])
                     object_ids.append(obj.id)
@@ -174,6 +145,3 @@ class Grounding2DPromptGenerator(BasePromptGenerator):
 
     def get_metric_class(self):
         return COCOMetric
-
-
-print(f"Registered prompt generator: {Grounding2DPromptGenerator.__name__}")
