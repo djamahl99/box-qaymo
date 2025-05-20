@@ -129,10 +129,7 @@ class ObjectDrawnBoxPromptGenerator(BasePromptGenerator):
         for camera in frame.cameras:
             camera_objects = [obj for obj in objects if obj.most_visible_camera_name == camera.name]
 
-            # depth_buffer = generate_object_depth_buffer(frame, camera) # TODO: bring this back?
-            img_vis = cv2.imread(camera.image_path) # TODO: remove
-            cv2.imwrite('cam.jpg', img_vis)
-
+            img_vis = cv2.imread(camera.image_path) 
 
             for obj in camera_objects:
                 # Get camera by visible
@@ -157,8 +154,6 @@ class ObjectDrawnBoxPromptGenerator(BasePromptGenerator):
                 if sum(ok) < 6 or min(depth) < 0:
                     continue
 
-                depth_min = depth[ok].min()
-
                 x_min, x_max = int(min(u)), int(max(u))
                 y_min, y_max = int(min(v)), int(max(v))
 
@@ -170,32 +165,12 @@ class ObjectDrawnBoxPromptGenerator(BasePromptGenerator):
                 if width < 32 or height < 32:
                     continue
 
-                # depth_buff_min = depth_buffer[y_min:y_max, x_min:x_max].min() # TODO: check if this is effective?
-
-                # # occluded
-                # if depth_buff_min < depth_min:
-                #     # TODO: mark as occluded?
-                #     continue
-
                 if obj.num_lidar_points_in_box < 5:
-                    print('< 5 points')
                     continue
 
                 color = (0, 255, 0)
                 img_vis = cv2.imread(camera.image_path)
                 cv2.rectangle(img_vis, (x_min, y_min), (x_max, y_max), color, 4)
-                # cv2.putText(
-                #     img_vis,
-                #     f'{obj.cvat_label} {obj.cvat_color}',
-                #     (x_min, y_min),
-                #     cv2.FONT_HERSHEY_SIMPLEX,
-                #     1,
-                #     (255, 255, 255),
-                #     2,
-                #     cv2.LINE_AA,
-                # )
-
-                # cv2.imwrite('object_drawn_box_prompt.jpg', img_vis)
 
                 _, buffer = cv2.imencode('.jpg', img_vis)  # or '.png'
                 img_base64 = base64.b64encode(buffer).decode('utf-8')
@@ -220,19 +195,6 @@ class ObjectDrawnBoxPromptGenerator(BasePromptGenerator):
                     
                     # Create the question with formatted options
                     question_text = question_template.format(formatted_options)
-                    
-                    cv2.putText(
-                        img_vis,
-                        answer_txt,
-                        (x_min, y_min),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        1,
-                        (255, 255, 255),
-                        2,
-                        cv2.LINE_AA,
-                    )
-
-                    cv2.imwrite('object_drawn_box_prompt.jpg', img_vis)
                     
                     question = SingleBase64ImageMultipleChoiceQuestion(
                         image_bas64=img_base64,
