@@ -10,21 +10,31 @@ from abc import ABC, abstractmethod
 from waymovqa.data.frame_info import FrameInfo
 from waymovqa.data.object_info import ObjectInfo
 from waymovqa.waymo_loader import WaymoDatasetLoader
-from waymovqa.prompt_generators import get_all_prompt_generators, get_prompt_generator, BasePromptGenerator
+from waymovqa.prompt_generators import (
+    get_all_prompt_generators,
+    get_prompt_generator,
+    BasePromptGenerator,
+)
 from waymovqa.models import MODEL_REGISTRY
 from waymovqa.models.base import BaseModel
 
 from waymovqa.data.vqa_dataset import VQADataset
 from tqdm import tqdm
 
+
 class VQAGenerator:
     """Main class for generating VQA samples."""
+
+    prompt_generators: List[BasePromptGenerator]
+    scene_prompt_generators: List[BasePromptGenerator]
+    object_prompt_generators: List[BasePromptGenerator]
+    frame_prompt_generators: List[BasePromptGenerator]
 
     def __init__(
         self,
         dataset_path: Path,
         prompt_generators: Optional[Union[List[str], List[BasePromptGenerator]]] = None,
-        model: BaseModel = None # TODO - infer prompt generators / from model
+        model: BaseModel = None,  # TODO - infer prompt generators from model
     ):
         """
         Initialize VQA generator.
@@ -35,7 +45,7 @@ class VQAGenerator:
         """
         self.dataset_path = Path(dataset_path)
         self.loader = WaymoDatasetLoader(self.dataset_path)
-        self.dataset = VQADataset(tag='ground_truth')
+        self.dataset = VQADataset(tag="ground_truth")
 
         print("Registered prompt generators:", get_all_prompt_generators())
         if prompt_generators is None:
@@ -56,179 +66,172 @@ class VQAGenerator:
                     raise TypeError(
                         f"Expected str or BasePromptGenerator, got {type(gen)}"
                     )
-                    
+
     def find_scenes(self) -> List[str]:
         """Find scenes to sample from."""
         return self.loader.get_scene_ids()
 
-    def generate_dataset_scene_based(self, questions_per_scene: int = 5, max_scenes: int = 5):
-        """
-        Generate VQA dataset based on scenes.
-
-        Args:
-            questions_per_scene: Number of questions to generate per scene
-
-        Returns:
-            List of VQA samples
-        """
-        scene_ids = self.loader.get_scene_ids()
-
-        scene_ids = random.sample(scene_ids, max_scenes)
-        
-        for scene_id in tqdm(scene_ids, desc="Generating questions for each scene"):
-            # Load scene
-            scene = self.loader.load_scene(scene_id)
-
-            scene_samples = []
-
-            # Sample a random timestamp
-            timestamps = self.loader.get_frame_timestamps(scene_id)
-
-            # print('timestamps', timestamps)
-
-            # Sample a frame for this scene
-            sampled_timestamps = random.sample(timestamps, min(questions_per_scene, len(timestamps)))
-
-            for timestamp in sampled_timestamps:
-                frame = self.loader.load_frame(scene_id, timestamp)
-
-                # Generate samples
-                for generator in self.prompt_generators:
-                    samples = generator.generate(scene, [], frame)
-
-                    scene_samples.extend(samples)
-
-            # Sample from questions for this scene
-            subsamples = random.sample(scene_samples, min(questions_per_scene, len(scene_samples)))
-
-            for sample in subsamples:
-                self.dataset.add_sample(*sample)
-        
-    def generate_dataset_object_based(self, total_samples: int = 500):
-        """
-        Generate VQA dataset by sampling objects.
-
-        Args:
-            total_samples: Total number of samples to generate
-
-        Returns:
-            List of VQA samples
-        """
-        object_ids = self.loader.load_all_objects_with_cvat_ids()
-        
+    def generate_dataset(self, total_samples: int = 500, balance_answers: bool = True):
+        """Generate VQA dataset."""
         all_samples = []
-        sampled_object_ids = set()
-        
-        # First pass: generate a large pool of samples
-        while len(all_samples) < total_samples * 3:
-            # Sample an object id
-            object_id = random.choice(object_ids)
 
-            if object_id in sampled_object_ids:
-                continue
+        # Load a subset of scenes
+        scene_ids = self.loader.get_scene_ids()
+        random.shuffle(scene_ids)
 
-            # get the corresponding scene
-            scene_id = self.loader.get_object_id_to_scene_id()[object_id]
+        # Process each scene
+        for scene_id in scene_ids:
+            # Load all frames for this scene
+            frames = self._load_all_frames(scene_id)
 
-            # Load scene
-            scene = self.loader.load_scene(scene_id)
-
-            scene_object_table = self.loader.load_scene_object_table(scene_id)
-            
-            scene_object_table_timestamp = None
-            for obj in scene_object_table:
-                if obj['id'] == object_id:
-                    timestamps = obj['timestamps']
-
-                    scene_object_table_timestamp = random.choice(timestamps)
-
-            if scene_object_table_timestamp is None:
-                continue
-
-            # Load object
-            sampled_object = self.loader.load_object(object_id, scene_id, scene_object_table_timestamp)
-
-            # Sample a frame for this object TODO: allow for multiple timestamp - integrate different answer / question in generator
-            timestamp = random.choice(sampled_object.frames)
-
-            frame = self.loader.load_frame(scene_id, timestamp)
-
-            assert object_id in [x.id for x in frame.objects]
-
-            sampled_object_frame = None
-            for obj in frame.objects:
-                if obj.id == sampled_object.id:
-                    sampled_object_frame = obj
-                    break
-
-            if not sampled_object_frame:
-                continue
-
-            # Generate samples
+            # Apply each generator to all frames
             for generator in self.prompt_generators:
-                samples = generator.generate(scene, [sampled_object_frame], frame)
+                samples = generator.generate(frames)
                 all_samples.extend(samples)
 
-                sampled_object_ids.add(object_id)
+        # Balance dataset if needed
+        if balance_answers:
+            final_samples = self._balance_samples(all_samples, total_samples)
+        else:
+            final_samples = random.sample(
+                all_samples, min(total_samples, len(all_samples))
+            )
 
-                
-            # Stop if we have enough samples
-            if len(all_samples) >= total_samples * 3:  # Generate 3x to allow for selection
-                break
-        
-        # TODO: sample analytics and then subsampling?
-        subsamples = random.sample(all_samples, len(all_samples)) # can subsam
-
-        for sample in subsamples:
-            # print('sample', sample)
+        # Add to dataset
+        for sample in final_samples:
             self.dataset.add_sample(*sample)
 
-    def generate_dataset(self, questions_per_scene: int = 5, total_samples: int = 500, 
-                         method: str = "combined") -> List[Dict[str, Any]]:
+    def _balance_samples(self, samples: List[Tuple], target_count: int) -> List[Tuple]:
         """
-        Generate VQA dataset using the specified method.
-
-        Args:
-            questions_per_scene: Number of questions per scene for scene-based generation
-            total_samples: Total number of samples for object-based generation
-            method: Generation method - "scene", "object", or "combined"
-
-        Returns:
-            List of VQA samples
+        Balance dataset to have more uniform distribution of answers.
+        Returns a subset of samples with a more balanced distribution.
         """
-        if method == "scene":
-            self.generate_dataset_scene_based(questions_per_scene, max_scenes=total_samples//questions_per_scene)
-        elif method == "object":
-            self.generate_dataset_object_based(total_samples)
-        elif method == "combined":
-            # Generate half using scene-based approach and half using object-based
-            self.generate_dataset_scene_based(questions_per_scene)
-                
-            self.generate_dataset_object_based(total_samples // 2)
-            
-            # TODO: shuffle
-        else:
-            raise ValueError(f"Invalid method '{method}'. Must be 'scene', 'object', or 'combined'")
+        # Group samples by the prompt generator
+        generator_samples = {}
+        for sample_idx, (question, answer) in enumerate(samples):
+            if answer.get_answer_text() is None:  # don't balance grounding 2d...
+                continue
+
+            generator_samples.setdefault(question.generator_name, [])
+            generator_samples[question.generator_name].append(sample_idx)
+
+        # Final indices after balancing
+        final_indices = []
+
+        for generator_name, generator_sample_indices in generator_samples.items():
+            print("generator_name", generator_name)
+            # Count frequency of each answer
+            answer_counts = {}
+            for sample_idx in generator_sample_indices:
+                answer = samples[sample_idx][1].get_answer_text()
+                answer_counts[answer] = answer_counts.get(answer, 0) + 1
+
+            print(f"Answer distribution before balancing: {answer_counts}")
+
+            # Calculate sample weights (inverse of frequency)
+            weights = []
+            for _, answer in samples:
+                frequency = answer_counts[answer.answer]
+                weight = 1.0 / frequency if frequency > 0 else 0
+                weights.append(weight)
+
+            # Normalize weights
+            total_weight = sum(weights)
+            if total_weight > 0:
+                weights = [w / total_weight for w in weights]
+
+            # Weighted random sampling
+            balanced_indices = random.choices(
+                range(len(samples)), weights=weights, k=min(target_count, len(samples))
+            )
+
+            # Print statistics after balancing
+            balanced_answers = [
+                samples[i][1].get_answer_text() for i in balanced_indices
+            ]
+            balanced_counts = {}
+            for answer in balanced_answers:
+                balanced_counts[answer] = balanced_counts.get(answer, 0) + 1
+
+            final_indices.extend(balanced_indices)
+
+        balanced_samples = [samples[i] for i in final_indices]
+
+        return balanced_samples
+
+    def _collect_all_object_contexts(self) -> List[Tuple[str, int]]:
+        """Collect all valid (scene_id, timestamp) combinations."""
+        contexts = []
+        scene_ids = self.loader.get_scene_ids()
+
+        for scene_id in scene_ids:
+            timestamps = self.loader.get_frame_timestamps(scene_id)
+            for timestamp in timestamps:
+                contexts.append((scene_id, timestamp))
+
+        # Shuffle to avoid bias
+        random.shuffle(contexts)
+        return contexts
+
+    def _collect_all_frame_contexts(self) -> List[Tuple[str, int]]:
+        """Collect all valid (scene_id, timestamp) combinations."""
+        contexts = []
+        scene_ids = self.loader.get_scene_ids()
+
+        for scene_id in scene_ids:
+            timestamps = self.loader.get_frame_timestamps(scene_id)
+            for timestamp in timestamps:
+                contexts.append((scene_id, timestamp))
+
+        # Shuffle to avoid bias
+        random.shuffle(contexts)
+        return contexts
+
+    def _collect_all_scene_contexts(self) -> List[str]:
+        """Collect all valid (scene_id, timestamp) combinations."""
+        scene_ids = self.loader.get_scene_ids()
+
+        # Shuffle to avoid bias
+        random.shuffle(scene_ids)
+        return scene_ids
 
 
 def main():
     """Main function to generate and save a VQA dataset."""
     import argparse
-    
-    parser = argparse.ArgumentParser(description="Generate VQA dataset from processed data")
-    parser.add_argument("--dataset_path", type=str, required=True, help="Path to processed waymo dataset")
-    parser.add_argument("--save_path", type=str, required=True, help="Path to save dataset")
-    parser.add_argument("--model", type=str, default=None, required=False, help="Model name")
-    parser.add_argument("--method", type=str, default="combined", choices=["scene", "object", "combined"],
-                        help="Generation method")
-    parser.add_argument("--questions_per_scene", type=int, default=5, 
-                        help="Number of questions per scene for scene-based generation")
-    parser.add_argument("--total_samples", type=int, default=500,
-                        help="Total number of samples for object-based generation")
-    parser.add_argument("--generators", type=str, nargs="+", default=None,
-                        help="Specific prompt generators to use (by name)")
-    parser.add_argument("--analyze", action="store_true", help="Analyze generated dataset")
-    
+
+    parser = argparse.ArgumentParser(
+        description="Generate VQA dataset from processed data"
+    )
+    parser.add_argument(
+        "--dataset_path",
+        type=str,
+        required=True,
+        help="Path to processed waymo dataset",
+    )
+    parser.add_argument(
+        "--save_path", type=str, required=True, help="Path to save dataset"
+    )
+    parser.add_argument(
+        "--model", type=str, default=None, required=False, help="Model name"
+    )
+    parser.add_argument(
+        "--total_samples",
+        type=int,
+        default=500,
+        help="Total number of samples for object-based generation",
+    )
+    parser.add_argument(
+        "--generators",
+        type=str,
+        nargs="+",
+        default=None,
+        help="Specific prompt generators to use (by name)",
+    )
+    parser.add_argument(
+        "--analyze", action="store_true", help="Analyze generated dataset"
+    )
+
     args = parser.parse_args()
 
     if args.model is not None:
@@ -238,20 +241,14 @@ def main():
 
     # Initialize generator
     generator = VQAGenerator(
-        dataset_path=args.dataset_path,
-        prompt_generators=args.generators,
-        model=model
+        dataset_path=args.dataset_path, prompt_generators=args.generators, model=model
     )
-    
+
     # Generate dataset
-    generator.generate_dataset(
-        questions_per_scene=args.questions_per_scene,
-        total_samples=args.total_samples,
-        method=args.method
-    )
-    
+    generator.generate_dataset(total_samples=args.total_samples)
+
     output_path = Path(args.save_path)
-    
+
     # Save dataset
     generator.dataset.save_dataset(str(output_path))
 
