@@ -1,6 +1,6 @@
 import random
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Union, Set, Tuple
+from typing import Dict, List, Any, Optional, Type, Union, Set, Tuple
 import json
 import numpy as np
 import cv2
@@ -8,7 +8,9 @@ from collections import defaultdict
 from abc import ABC, abstractmethod
 
 from waymovqa.answers.multiple_choice import MultipleChoiceAnswer
-from waymovqa.questions.single_image_single_object import SingleImageSingleObjectQuestion
+from waymovqa.questions.single_image_single_object import (
+    SingleImageSingleObjectQuestion,
+)
 from waymovqa.data.scene_info import SceneInfo
 from waymovqa.data.object_info import ObjectInfo
 from waymovqa.data.frame_info import FrameInfo
@@ -25,38 +27,17 @@ from waymovqa.primitives import colors as labelled_colors
 class ObjectColorPromptGenerator(BasePromptGenerator):
     """Generates questions about object colors."""
 
-    def generate(self, scene, objects, frame, frames) -> List[Tuple[SingleImageSingleObjectQuestion, MultipleChoiceAnswer]]:
+    def generate(
+        self, frames
+    ) -> List[Tuple[SingleImageSingleObjectQuestion, MultipleChoiceAnswer]]:
         """Generate color-based questions."""
         samples = []
 
-        # Filter for objects with colors
-        colored_objects = [obj for obj in objects if obj.cvat_color]
-
-        if frame is not None:
-            # Filter objects that occur in the given timestamp
-            colored_objects = [obj for obj in objects if frame.timestamp in obj.timestamp]
-
-        if not colored_objects:
-            return []
-
-        # Get colored objects visible in the chosen timestamp
-        visible_objects = [obj for obj in colored_objects]
-
-        if not visible_objects:
-            return []
+        # Track all objects across frames
+        object_best_views = self._find_best_object_views(frames)
 
         # Generate color questions
-        for obj in random.sample(visible_objects, min(3, len(visible_objects))):
-            # Get camera by visible
-            camera_name = obj.visible_cameras[0]
-
-            # Get scene camera
-            camera = None
-            for cam in frame.images:
-                if cam.name == camera_name:
-                    camera = cam
-                    break
-
+        for frame, camera, obj in object_best_views.values():
             if obj.cvat_label and obj.cvat_color and camera is not None:
                 question = f"What color is the {obj.cvat_label.lower()}?"  # TODO: add more specific prompt?
 
@@ -67,7 +48,7 @@ class ObjectColorPromptGenerator(BasePromptGenerator):
                     scene_id=obj.scene_id,
                     timestamp=frame.timestamp,
                     camera_name=camera.name,
-                    generator_name = f"{self.__class__.__module__}.{self.__class__.__name__}"
+                    generator_name=f"{self.__class__.__module__}.{self.__class__.__name__}",
                 )
                 answer = MultipleChoiceAnswer(
                     choices=[x.lower() for x in labelled_colors],
@@ -78,11 +59,11 @@ class ObjectColorPromptGenerator(BasePromptGenerator):
 
         return samples
 
+    def get_question_type(self) -> type:
+        return SingleImageSingleObjectQuestion
+
     def get_metric_class(self) -> str:
         return "MultipleChoiceMetric"
 
     def get_answer_type(self):
         return MultipleChoiceAnswer
-    
-    def get_supported_methods(self) -> List[str]:
-        return ['frame', 'object']

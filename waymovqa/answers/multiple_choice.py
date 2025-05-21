@@ -15,11 +15,20 @@ class MultipleChoiceAnswer(BaseAnswer):
     def from_json(cls, text: str):
         data = json.loads(text)
 
-        return cls(choices=data['choices'], answer=data['answer'])
-    
+        return cls(choices=data["choices"], answer=data["answer"])
+
     @classmethod
     def from_dict(cls, data: Dict):
-        return cls(choices=data['choices'], answer=data['answer'])
+        return cls(choices=data["choices"], answer=data["answer"])
 
     def to_json(self):
-        return json.dumps(dict(choices=self.choices, answer=self.answer, answer_type=str(self.answer_type)))
+        return json.dumps(
+            dict(
+                choices=self.choices,
+                answer=self.answer,
+                answer_type=str(self.answer_type),
+            )
+        )
+
+    def get_answer_text(self) -> str:
+        return self.answer

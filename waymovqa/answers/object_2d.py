@@ -53,3 +53,6 @@ class Object2DAnswer(BaseAnswer):
                 answer_type=str(self.answer_type),
             )
         )
+
+    def get_answer_text(self):
+        return None

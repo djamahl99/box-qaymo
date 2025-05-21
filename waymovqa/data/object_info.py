@@ -13,12 +13,19 @@ if TYPE_CHECKING:
     from waymovqa.data.camera_info import CameraInfo
     from waymovqa.data.scene_info import SceneInfo
 
+WAYMO_TYPE_MAPPING = {
+    "TYPE_UNKNOWN": None,
+    "TYPE_VEHICLE": "Vehicle",
+    "TYPE_PEDESTRIAN": "Pedestrian",
+    "TYPE_SIGN": "Sign",
+    "TYPE_CYCLIST": "Cyclist",
+}
 
 
 class ObjectInfo(DataObject):
     """3D object information."""
 
-    def __init__(self, scene_id: str, object_id: str, timestamp: int = None):
+    def __init__(self, scene_id: str, object_id: str, timestamp: int):
         super().__init__(scene_id)
         self.id = object_id
         self.timestamp = timestamp  # Initial timestamp
@@ -35,7 +42,6 @@ class ObjectInfo(DataObject):
         self.most_visible_camera_name = None
         self.metadata = None
         # New fields for multi-frame tracking
-        self.frames = []  # List of timestamps where this object appears
         self.visible_cameras = []  # List of cameras where this object is visible
 
     def to_dict(self) -> Dict[str, Any]:
@@ -47,7 +53,6 @@ class ObjectInfo(DataObject):
             "in_cvat": self.in_cvat,
             "cvat_label": self.cvat_label,
             "cvat_color": self.cvat_color,
-            "frames": self.frames,
             "visible_cameras": self.visible_cameras,
             "box": self.box,
             "type": self.type,
@@ -96,15 +101,6 @@ class ObjectInfo(DataObject):
         if "metadata" in data:
             obj.metadata = data["metadata"]
 
-        # Add multi-frame tracking fields
-        if "frames" in data:
-            obj.frames = data["frames"]
-        elif "timestamps" in data:  # For compatibility with older format
-            obj.frames = data["timestamps"]
-        else:
-            # Initialize with single timestamp if frames not provided
-            obj.frames = [obj.timestamp] if obj.timestamp is not None else []
-
         if "visible_cameras" in data:
             obj.visible_cameras = data["visible_cameras"]
         else:
@@ -115,6 +111,20 @@ class ObjectInfo(DataObject):
 
         return obj
 
+    def get_centre(self) -> np.ndarray:
+        """Get object centre in np as (3,) shape"""
+        if self.camera_synced_box:
+            return np.array(
+                [
+                    self.camera_synced_box["center_x"],
+                    self.camera_synced_box["center_y"],
+                    self.camera_synced_box["center_z"],
+                ]
+            )
+        return np.array(
+            [self.box["center_x"], self.box["center_y"], self.box["center_z"]]
+        )
+
     def project_to_image(
         self,
         frame_info: "FrameInfo",
@@ -122,117 +132,147 @@ class ObjectInfo(DataObject):
         return_depth: bool = True,
     ) -> np.ndarray:
         """Project 3D object to 2D image.
-        
+
         Note: waymo_open_dataset is imported inside this function to allow
         partial functionality when running in environments where the package
         is not available.
         """
         from waymo_open_dataset.wdl_limited.camera.ops import py_camera_model_ops
         from waymo_open_dataset.utils import box_utils
-        
-        pose_matrix = np.array(frame_info.pose)
+        import tensorflow as tf
 
-        box = self.camera_synced_box if self.camera_synced_box is not None else self.box
+        with tf.device("/CPU:0"):
 
-        box_coords = np.array(
-            [
-                [
-                    box["center_x"],
-                    box["center_y"],
-                    box["center_z"],
-                    box["length"],
-                    box["width"],
-                    box["height"],
-                    box["heading"],
-                ]
-            ]
-        )
-        corners = box_utils.get_upright_3d_box_corners(box_coords)[0].numpy()
+            pose_matrix = np.array(frame_info.pose)
 
-        homogeneous_points = np.hstack([corners, np.ones((corners.shape[0], 1))])
-        # Matrix multiplication
-        world_points_homogeneous = np.matmul(homogeneous_points, pose_matrix.T)
-        # Extract 3D coordinates
-        world_points = world_points_homogeneous[:, :3]
-
-        image_metadata = np.array(frame_info.pose).reshape(-1).tolist()
-
-        # Find camera info from scene if needed
-        camera_info_frame = None
-        if frame_info:
-            for cam in frame_info.cameras:
-                if cam.name == camera_info.name:
-                    camera_info_frame = cam
-                    break
-
-        metadata = list(
-            [
-                camera_info_frame.width,
-                camera_info_frame.height,
-                camera_info_frame.rolling_shutter_direction,
-            ]
-        )
-
-        velocity = camera_info_frame.velocity
-        image_metadata.append(velocity.get("v_x", 0))
-        image_metadata.append(velocity.get("v_y", 0))
-        image_metadata.append(velocity.get("v_z", 0))
-        image_metadata.append(velocity.get("w_x", 0))
-        image_metadata.append(velocity.get("w_y", 0))
-        image_metadata.append(velocity.get("w_z", 0))
-
-        # Get timing attributes with fallbacks
-        image_metadata.append(camera_info_frame.pose_timestamp)
-        image_metadata.append(camera_info_frame.shutter)
-        image_metadata.append(camera_info_frame.camera_trigger_time)
-        image_metadata.append(camera_info_frame.camera_readout_done_time)
-
-        extrinsic, intrinsic = camera_info_frame.extrinsic, camera_info_frame.intrinsic
-
-        assert intrinsic is not None and extrinsic is not None
-
-        extrinsic = np.array(extrinsic, dtype=np.float32).reshape(4, 4)
-        intrinsic = np.array(intrinsic, dtype=np.float32)
-
-        try:
-            return py_camera_model_ops.world_to_image(
-                extrinsic,
-                intrinsic,
-                metadata,
-                image_metadata,
-                world_points,
-                return_depth=return_depth,
-            ).numpy()
-        except ValueError as e:
-            print(
-                dict(
-                    extrinsic=extrinsic,
-                    intrinsic=intrinsic,
-                    metadata=metadata,
-                    image_metadata=image_metadata,
-                    world_points=world_points,
-                )
+            box = (
+                self.camera_synced_box
+                if self.camera_synced_box is not None
+                else self.box
             )
 
-            raise e
+            box_coords = np.array(
+                [
+                    [
+                        box["center_x"],
+                        box["center_y"],
+                        box["center_z"],
+                        box["length"],
+                        box["width"],
+                        box["height"],
+                        box["heading"],
+                    ]
+                ]
+            )
+            corners = box_utils.get_upright_3d_box_corners(box_coords)[0].numpy()
 
-    def add_frame(self, timestamp: int):
-        """Add a timestamp to the list of frames where this object appears."""
-        if timestamp not in self.frames:
-            self.frames.append(timestamp)
+            homogeneous_points = np.hstack([corners, np.ones((corners.shape[0], 1))])
+            # Matrix multiplication
+            world_points_homogeneous = np.matmul(homogeneous_points, pose_matrix.T)
+            # Extract 3D coordinates
+            world_points = world_points_homogeneous[:, :3]
+
+            image_metadata = np.array(frame_info.pose).reshape(-1).tolist()
+
+            # Find camera info from scene if needed
+            camera_info_frame = None
+            if frame_info:
+                for cam in frame_info.cameras:
+                    if cam.name == camera_info.name:
+                        camera_info_frame = cam
+                        break
+
+            metadata = list(
+                [
+                    camera_info_frame.width,
+                    camera_info_frame.height,
+                    camera_info_frame.rolling_shutter_direction,
+                ]
+            )
+
+            velocity = camera_info_frame.velocity
+            image_metadata.append(velocity.get("v_x", 0))
+            image_metadata.append(velocity.get("v_y", 0))
+            image_metadata.append(velocity.get("v_z", 0))
+            image_metadata.append(velocity.get("w_x", 0))
+            image_metadata.append(velocity.get("w_y", 0))
+            image_metadata.append(velocity.get("w_z", 0))
+
+            # Get timing attributes with fallbacks
+            image_metadata.append(camera_info_frame.pose_timestamp)
+            image_metadata.append(camera_info_frame.shutter)
+            image_metadata.append(camera_info_frame.camera_trigger_time)
+            image_metadata.append(camera_info_frame.camera_readout_done_time)
+
+            extrinsic, intrinsic = (
+                camera_info_frame.extrinsic,
+                camera_info_frame.intrinsic,
+            )
+
+            assert intrinsic is not None and extrinsic is not None
+
+            extrinsic = np.array(extrinsic, dtype=np.float32).reshape(4, 4)
+            intrinsic = np.array(intrinsic, dtype=np.float32)
+
+            try:
+                return py_camera_model_ops.world_to_image(
+                    extrinsic,
+                    intrinsic,
+                    metadata,
+                    image_metadata,
+                    world_points,
+                    return_depth=return_depth,
+                ).numpy()
+            except ValueError as e:
+                print(
+                    dict(
+                        extrinsic=extrinsic,
+                        intrinsic=intrinsic,
+                        metadata=metadata,
+                        image_metadata=image_metadata,
+                        world_points=world_points,
+                    )
+                )
+
+                raise e
 
     def add_visible_camera(self, camera_name: str):
         """Add a camera to the list of cameras where this object is visible."""
         if camera_name and camera_name not in self.visible_cameras:
             self.visible_cameras.append(camera_name)
 
+    def get_simple_type(self) -> Optional[str]:
+        """Return type from Waymo in readable format."""
+        return self.type if self.type is None else WAYMO_TYPE_MAPPING[self.type]
+
+    def get_object_cvat_description(self) -> Optional[str]:
+        """Generates basic object description for question."""
+        prompt = None
+        if self.cvat_color and self.cvat_label:
+            prompt = f"{self.cvat_color} {self.cvat_label.lower()}"
+        elif self.cvat_label:
+            prompt = self.cvat_label.lower()
+
+        return prompt
+
+    def get_object_description(self) -> Optional[str]:
+        """Generates basic object description for question."""
+        prompt = None
+        if self.cvat_color and self.cvat_label:
+            prompt = f"{self.cvat_color} {self.cvat_label.lower()}"
+        elif self.cvat_label:
+            prompt = self.cvat_label.lower()
+        elif self.get_simple_type() is not None:
+            prompt = self.get_simple_type()
+
+        return prompt
+
     def __repr__(self) -> str:
-        text = f'Object #{self.id} timestamp={self.timestamp}'
+        text = f"Object #{self.id} timestamp={self.timestamp}"
 
         if self.cvat_label is not None:
             text += f" {self.cvat_label}\n"
-        
-        text += 'Frames: ' + ','.join(map(str, self.frames))
-        text += 'Visible Cameras: ' + ','.join(self.visible_cameras)
+
+        text += "Visible Cameras: " + ",".join(self.visible_cameras)
 
         return text

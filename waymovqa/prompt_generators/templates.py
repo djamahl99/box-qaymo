@@ -1,0 +1,15 @@
+COLOR_QUESTIONS_CHOICES = [
+    "How would you describe the color of the object out of {}?",
+    "What color is the highlighted object? Choose from {}.",
+    "Select the best color description for this object: {}.",
+]
+
+LABEL_QUESTIONS_CHOICES = [
+    "Classify the image into one of the following: {}.",
+    "What type of object is highlighted? Choose from {}.",
+    "Identify this object as one of the following: {}.",
+]
+
+HEADING_QUESTIONS_CHOICES = [
+    "How would you describe the heading of the highlighted object? Choose from {}."
+]

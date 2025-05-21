@@ -10,14 +10,16 @@ from waymovqa.data.frame_info import FrameInfo
 from waymovqa.data.camera_info import CameraInfo
 from waymovqa.data.laser_info import LaserInfo
 
+
 class WaymoDatasetLoader:
     """Helper class to load and query dataset files."""
+
     object_id_to_scene_id: Dict = None
 
     def __init__(self, base_path: Path):
         self.base_path = Path(base_path)
 
-        assert self.base_path.exists(), f'{base_path} does not exist!'
+        assert self.base_path.exists(), f"{base_path} does not exist!"
 
         self.scene_infos_path = self.base_path / "scene_infos"
         self.frame_infos_path = self.base_path / "frame_infos"
@@ -66,7 +68,7 @@ class WaymoDatasetLoader:
         """Load object by ID and scene ID."""
         obj_key = f"{object_id}_{scene_id}_{timestamp}"
         # if obj_key in self.objects:
-            # return self.objects[obj_key]
+        # return self.objects[obj_key]
 
         obj_path = self.object_infos_path / f"object_{obj_key}.json"
         if not obj_path.exists():
@@ -75,99 +77,6 @@ class WaymoDatasetLoader:
         obj = ObjectInfo.load(obj_path)
         self.objects[obj_key] = obj
         return obj
-
-    def load_all_objects_with_cvat_ids(self) -> List[str]:
-        """Load all objects with CVAT labels for a scene."""
-        cvat_paths = list(self.object_lists_path.rglob("*_all_cvat_objects.txt"))
-        
-        assert len(cvat_paths) == 202, f'got {len(cvat_paths)} cvat paths'
-
-        # Track object_ids over all scenes with a set as there might be duplicates
-        object_ids = set()
-        object_id_to_scene_id = {}
-
-        for cvat_path in cvat_paths:
-            if not cvat_path.exists():
-                continue
-
-            scene_id = cvat_path.name.replace('_all_cvat_objects.txt', '')
-
-            with open(cvat_path, "r") as f:
-                scene_object_ids = [line.strip() for line in f if line.strip()]
-
-            for scene_object_id in scene_object_ids:
-                object_id_to_scene_id[scene_object_id] = scene_id
-
-            object_ids.update(scene_object_ids)
-
-        self.object_id_to_scene_id = object_id_to_scene_id
-
-        # Save for future
-        object_id_to_scene_id_path = self.base_path / 'object_id_to_scene_id.json'
-        if not object_id_to_scene_id_path.exists():
-            with open(object_id_to_scene_id_path, 'w') as f:
-                json.dump(object_id_to_scene_id, f)
-
-        object_ids = list(object_ids)
-
-        return object_ids
-    
-    def get_object_id_to_scene_id(self) -> Dict[str, str]:
-        """Gets mapping from object ids to scene ids."""
-        if self.object_id_to_scene_id is not None:
-            return self.object_id_to_scene_id
-        
-        object_id_to_scene_id_path = self.base_path / 'object_id_to_scene_id.json'
-
-        if not object_id_to_scene_id_path.exists():
-            self.load_all_objects_with_cvat_ids()
-
-            return self.object_id_to_scene_id
-        else:
-            with open(object_id_to_scene_id_path, 'r') as f:
-                self.object_id_to_scene_id = json.load(f)
-
-            return self.object_id_to_scene_id
-
-    def load_objects_with_cvat(self, scene_id: str) -> List[ObjectInfo]:
-        """Load all objects with CVAT labels for a scene."""
-        cvat_path = self.object_lists_path / f"{scene_id}_all_cvat_objects.txt"
-        if not cvat_path.exists():
-            return []
-
-        with open(cvat_path, "r") as f:
-            object_ids = [line.strip() for line in f if line.strip()]
-
-        objects = []
-        for obj_id in object_ids:
-            try:
-                obj = self.load_object(obj_id, scene_id)
-                objects.append(obj)
-            except FileNotFoundError:
-                # Skip objects that can't be found
-                continue
-
-        return objects
-
-    def load_objects_with_color(self, scene_id: str) -> List[ObjectInfo]:
-        """Load all objects with color information for a scene."""
-        color_path = self.object_lists_path / f"{scene_id}_all_color_objects.txt"
-        if not color_path.exists():
-            return []
-
-        with open(color_path, "r") as f:
-            object_ids = [line.strip() for line in f if line.strip()]
-
-        objects = []
-        for obj_id in object_ids:
-            try:
-                obj = self.load_object(obj_id, scene_id)
-                objects.append(obj)
-            except FileNotFoundError:
-                # Skip objects that can't be found
-                continue
-
-        return objects
 
     def load_frame_object_table(
         self, scene_id: str, timestamp: int
@@ -195,7 +104,7 @@ class WaymoDatasetLoader:
         """Get all frame timestamps for a scene."""
         prefix = f"{scene_id}_"
         frame_files = [f for f in self.frame_infos_path.glob(f"{prefix}*.json")]
-        return [int(f.stem.replace(prefix, "")) for f in frame_files]
+        return sorted([int(f.stem.replace(prefix, "")) for f in frame_files])
 
     def get_image_path(self, camera_info: CameraInfo, timestamp: int = None) -> str:
         """Load camera image from path."""
@@ -213,7 +122,7 @@ class WaymoDatasetLoader:
 
         if not img_path.exists():
             raise FileNotFoundError(f"Image not found at {img_path}")
-        
+
         return str(img_path)
 
     def load_image(self, camera_info: CameraInfo, timestamp: int = None) -> np.ndarray:

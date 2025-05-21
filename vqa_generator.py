@@ -26,9 +26,6 @@ class VQAGenerator:
     """Main class for generating VQA samples."""
 
     prompt_generators: List[BasePromptGenerator]
-    scene_prompt_generators: List[BasePromptGenerator]
-    object_prompt_generators: List[BasePromptGenerator]
-    frame_prompt_generators: List[BasePromptGenerator]
 
     def __init__(
         self,
@@ -45,7 +42,16 @@ class VQAGenerator:
         """
         self.dataset_path = Path(dataset_path)
         self.loader = WaymoDatasetLoader(self.dataset_path)
-        self.dataset = VQADataset(tag="ground_truth")
+
+        self.datasets = {
+            "training": VQADataset(tag="training_ground_truth"),
+            "validation": VQADataset(tag="validation_ground_truth"),
+        }
+
+        self.split_paths = {
+            "training": self.dataset_path / "splits/train.txt",
+            "validation": self.dataset_path / "splits/val.txt",
+        }
 
         print("Registered prompt generators:", get_all_prompt_generators())
         if prompt_generators is None:
@@ -75,33 +81,51 @@ class VQAGenerator:
         """Generate VQA dataset."""
         all_samples = []
 
-        # Load a subset of scenes
-        scene_ids = self.loader.get_scene_ids()
-        random.shuffle(scene_ids)
+        for split_name, split_path in self.split_paths.items():
+            assert split_path.exists(), "Split path does not exist!"
+            with open(split_path, "r") as f:
+                lines = f.readlines()
 
-        # Process each scene
-        for scene_id in scene_ids:
-            # Load all frames for this scene
-            frames = self._load_all_frames(scene_id)
+            scene_ids = [x.strip() for x in lines]
+            random.shuffle(scene_ids)
 
-            # Apply each generator to all frames
-            for generator in self.prompt_generators:
-                samples = generator.generate(frames)
-                all_samples.extend(samples)
+            # Process each scene
+            for scene_id in tqdm(scene_ids, desc=f"Generating {split_name} dataset"):
+                # Load all frames for this scene
+                frames = self._load_all_frames(scene_id)
 
-        # Balance dataset if needed
-        if balance_answers:
-            final_samples = self._balance_samples(all_samples, total_samples)
-        else:
-            final_samples = random.sample(
-                all_samples, min(total_samples, len(all_samples))
-            )
+                # Apply each generator to all frames
+                for generator in self.prompt_generators:
+                    samples = generator.generate(frames)
+                    all_samples.extend(samples)
 
-        # Add to dataset
-        for sample in final_samples:
-            self.dataset.add_sample(*sample)
+                if len(all_samples) >= total_samples * 1.5:
+                    break
 
-    def _balance_samples(self, samples: List[Tuple], target_count: int) -> List[Tuple]:
+            # Balance dataset if needed
+            if balance_answers:
+                final_samples = self._balance_samples(all_samples, total_samples)
+            else:
+                final_samples = random.sample(
+                    all_samples, min(total_samples, len(all_samples))
+                )
+
+            # Add to dataset
+            for sample in final_samples:
+                self.datasets[split_name].add_sample(*sample)
+
+    def _load_all_frames(self, scene_id) -> List[FrameInfo]:
+        """Load all frames for a scene_id"""
+        timestamps = self.loader.get_frame_timestamps(scene_id)
+        frames = []
+        for timestamp in timestamps:
+            frames.append(self.loader.load_frame(scene_id, timestamp))
+
+        return frames
+
+    def _balance_samples(
+        self, samples: List[Tuple], target_count: int, class_balance_thresh: float = 0.5
+    ) -> List[Tuple]:
         """
         Balance dataset to have more uniform distribution of answers.
         Returns a subset of samples with a more balanced distribution.
@@ -118,20 +142,35 @@ class VQAGenerator:
         # Final indices after balancing
         final_indices = []
 
+        print("generator_samples.keys()", generator_samples.keys())
+
         for generator_name, generator_sample_indices in generator_samples.items():
-            print("generator_name", generator_name)
             # Count frequency of each answer
             answer_counts = {}
+            total_answers = 0
             for sample_idx in generator_sample_indices:
                 answer = samples[sample_idx][1].get_answer_text()
                 answer_counts[answer] = answer_counts.get(answer, 0) + 1
+                total_answers += 1
 
+            print(f"{generator_name}")
             print(f"Answer distribution before balancing: {answer_counts}")
+
+            # Check if we need to prune
+            for answer, answer_count in answer_counts.items():
+                if (
+                    answer_count
+                    < class_balance_thresh * (1.0 / len(answer_counts)) * total_answers
+                ):
+                    print(
+                        "WARNING: Maybe we should prune this answer:", answer
+                    )  # TODO: probably no pruning since rare questions are inherent to autonomous driving
 
             # Calculate sample weights (inverse of frequency)
             weights = []
-            for _, answer in samples:
-                frequency = answer_counts[answer.answer]
+            for sample_idx in generator_sample_indices:
+                answer = samples[sample_idx][1]
+                frequency = answer_counts[answer.get_answer_text()]
                 weight = 1.0 / frequency if frequency > 0 else 0
                 weights.append(weight)
 
@@ -142,7 +181,9 @@ class VQAGenerator:
 
             # Weighted random sampling
             balanced_indices = random.choices(
-                range(len(samples)), weights=weights, k=min(target_count, len(samples))
+                generator_sample_indices,
+                weights=weights,
+                k=min(target_count, len(generator_sample_indices)),
             )
 
             # Print statistics after balancing
@@ -153,47 +194,16 @@ class VQAGenerator:
             for answer in balanced_answers:
                 balanced_counts[answer] = balanced_counts.get(answer, 0) + 1
 
+            print(f"Answer distribution AFTER balancing: {answer_counts}")
+
             final_indices.extend(balanced_indices)
+
+        # Remove duplicates
+        final_indices = list(set(final_indices))
 
         balanced_samples = [samples[i] for i in final_indices]
 
         return balanced_samples
-
-    def _collect_all_object_contexts(self) -> List[Tuple[str, int]]:
-        """Collect all valid (scene_id, timestamp) combinations."""
-        contexts = []
-        scene_ids = self.loader.get_scene_ids()
-
-        for scene_id in scene_ids:
-            timestamps = self.loader.get_frame_timestamps(scene_id)
-            for timestamp in timestamps:
-                contexts.append((scene_id, timestamp))
-
-        # Shuffle to avoid bias
-        random.shuffle(contexts)
-        return contexts
-
-    def _collect_all_frame_contexts(self) -> List[Tuple[str, int]]:
-        """Collect all valid (scene_id, timestamp) combinations."""
-        contexts = []
-        scene_ids = self.loader.get_scene_ids()
-
-        for scene_id in scene_ids:
-            timestamps = self.loader.get_frame_timestamps(scene_id)
-            for timestamp in timestamps:
-                contexts.append((scene_id, timestamp))
-
-        # Shuffle to avoid bias
-        random.shuffle(contexts)
-        return contexts
-
-    def _collect_all_scene_contexts(self) -> List[str]:
-        """Collect all valid (scene_id, timestamp) combinations."""
-        scene_ids = self.loader.get_scene_ids()
-
-        # Shuffle to avoid bias
-        random.shuffle(scene_ids)
-        return scene_ids
 
 
 def main():
@@ -250,7 +260,12 @@ def main():
     output_path = Path(args.save_path)
 
     # Save dataset
-    generator.dataset.save_dataset(str(output_path))
+    for split_name, dataset in generator.datasets.items():
+        split_save_path = output_path.with_name(f"{output_path.stem}_{split_name}.json")
+
+        print(f"Saving {split_name} to {split_save_path}")
+
+        dataset.save_dataset(str(split_save_path))
 
 
 if __name__ == "__main__":

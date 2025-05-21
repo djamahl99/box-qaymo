@@ -6,28 +6,24 @@ from typing import Dict, Any, List, Union, Type, TypeVar, Generic, Optional
 import numpy as np
 
 
-class RawTextAnswer(BaseAnswer):
+class RegressionAnswer(BaseAnswer):
     """Typed format for raw text answer."""
 
-    answer_type: AnswerType = AnswerType.RAW_TEXT
-    text: str
+    answer_type: AnswerType = AnswerType.REGRESSION
+    value: float
 
     @classmethod
     def from_dict(cls, data: Dict):
-        return cls(text=data["text"])
-
-    @classmethod
-    def from_text(cls, text: str):
-        return cls(text=text.strip())
+        return cls(value=data["value"])
 
     @classmethod
     def from_json(cls, text: str):
         data = json.loads(text)
 
-        return cls(text=data["text"])
+        return cls(value=data["value"])
 
     def to_json(self):
-        return json.dumps(dict(text=self.text, answer_type=str(self.answer_type)))
+        return json.dumps(dict(value=self.value, answer_type=str(self.answer_type)))
 
     def get_answer_text(self) -> str:
-        return self.text
+        return f"{self.value:.2f}"

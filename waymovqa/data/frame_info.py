@@ -8,9 +8,11 @@ from waymovqa.data.object_info import ObjectInfo
 from waymovqa.data.camera_info import CameraInfo
 from waymovqa.data.laser_info import LaserInfo
 
+
 class WeatherType(str, Enum):
     RAINY = "rainy"
     SUNNY = "sunny"
+
 
 class LocationType(str, Enum):
     SAN_FRANCISCO = "location_sf"
@@ -22,13 +24,16 @@ class LocationType(str, Enum):
     CHANDLER = "location_chd"  # Chandler, AZ
     OTHER = "location_other"
 
+
 class TimeOfDayType(str, Enum):
     DAY = "Day"
     DAWN_DUSK = "Dawn/Dusk"
     NIGHT = "Night"
 
+
 class FrameInfo(DataObject):
     """Frame information."""
+
     weather: Optional[WeatherType]
     location: Optional[LocationType]
     time_of_day: Optional[TimeOfDayType]
@@ -78,8 +83,8 @@ class FrameInfo(DataObject):
         # Load camera data
         for img_data in data.get("images", []):
             camera = CameraInfo.from_dict(img_data)
-            if 'dataset_path' in data and not Path(camera.image_path).exists():
-                camera.image_path = str(Path(data['dataset_path']) / camera.image_path)
+            if "dataset_path" in data and not Path(camera.image_path).exists():
+                camera.image_path = str(Path(data["dataset_path"]) / camera.image_path)
             frame.cameras.append(camera)
 
         # Load point cloud data
@@ -88,9 +93,9 @@ class FrameInfo(DataObject):
             frame.point_clouds.append(pc)
 
         for obj in data.get("objects", []):
-            if 'path' in obj:
-                if 'dataset_path' in data:
-                    path = Path(data['dataset_path']) / obj['path']
+            if "path" in obj:
+                if "dataset_path" in data:
+                    path = Path(data["dataset_path"]) / obj["path"]
                     frame.add_object(ObjectInfo.load(path))
             else:
                 frame.add_object(ObjectInfo.from_dict(obj))
@@ -101,7 +106,7 @@ class FrameInfo(DataObject):
         time_of_day_str = data.get("time_of_day")
         if time_of_day_str:
             frame.time_of_day = TimeOfDayType(time_of_day_str)
-        
+
         weather_str = data.get("weather")
         if weather_str:
             try:
@@ -126,8 +131,6 @@ class FrameInfo(DataObject):
     def add_object(self, obj: ObjectInfo):
         """Add an object to the frame."""
         self.objects.append(obj)
-        # Update the object's frames list
-        obj.add_frame(self.timestamp)
 
     @classmethod
     def load(cls, path: Path):
@@ -135,6 +138,6 @@ class FrameInfo(DataObject):
         with open(path, "r") as f:
             data = json.load(f)
 
-        data['dataset_path'] = path.parent.parent
+        data["dataset_path"] = path.parent.parent
 
         return cls.from_dict(data)

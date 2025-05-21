@@ -16,50 +16,54 @@ from waymovqa.metrics.coco import COCOMetric
 from waymovqa.prompt_generators.base import BasePromptGenerator
 from waymovqa.prompt_generators import register_prompt_generator
 from waymovqa.answers import Object2DAnswer, MultiObject2DAnswer, BaseAnswer
-from waymovqa.questions import SingleImageSingleObjectQuestion, SingleImageMultiplePromptQuestion
+from waymovqa.questions import (
+    SingleImageSingleObjectQuestion,
+    SingleImageMultiplePromptQuestion,
+)
 from waymovqa.questions.single_image_multi_prompt import PromptEntry
 
 MIN_OBJECT_SIZE = 32
-
-_DEBUG = True
 
 
 @register_prompt_generator
 class Grounding2DPromptGenerator(BasePromptGenerator):
     """Generates questions about object locations with multiple prompts per image."""
 
+    sampled_object_ids: Set[str]
+
     def generate(
-        self, 
-        scene: Optional[SceneInfo] = None, 
-        objects: Optional[List[ObjectInfo]] = None, 
-        frame: Optional[FrameInfo] = None,
-        frames: Optional[List[FrameInfo]] = None
+        self,
+        frames,
     ) -> List[Tuple[SingleImageMultiplePromptQuestion, BaseAnswer]]:
         samples = []
 
-        labeled_objects = [obj for obj in frame.objects if obj.cvat_label]
+        # Track all objects across frames to find good instances
+        object_best_views = self._find_best_object_views(frames)
 
-        if not labeled_objects:
-            return []
+        # Map timestamp to frames list index
+        timestamp_to_frame = {frame.timestamp: frame for frame in frames}
 
-        timestamp = frame.timestamp
+        frame_cams = {}
+        frame_cam_set = set()
+        for frame, camera, obj in object_best_views.values():
+            frame_cam_set.add((frame.timestamp, camera.name))
 
-        for camera in frame.cameras:
-            dataset_path = Path("/media/local-data/uqdetche/waymo_vqa_dataset/")
-            img_path = dataset_path / camera.image_path
-            img_vis = cv2.imread(img_path)
+            frame_cams.setdefault(frame.timestamp, {})
+            frame_cams[frame.timestamp][camera.name] = camera
+
+        # Generate questions for each object using its best frame/camera
+        for frame_timestamp, camera_name in frame_cam_set:
+            frame = timestamp_to_frame[frame_timestamp]
+            camera = frame_cams[frame_timestamp, camera_name]
 
             prompt_to_objs = defaultdict(list)
 
-            for obj in labeled_objects:
-                if camera.name not in obj.visible_cameras:
-                    continue
-
+            for obj in frame.objects:
                 # Build prompt string
-                if obj.cvat_color and obj.cvat_label:
-                    prompt = f"{obj.cvat_color} {obj.cvat_label.lower()}"
-                else:
-                    prompt = obj.cvat_label.lower()
+                prompt = obj.get_object_description()
+
+                if prompt is None:
+                    continue
 
                 prompt_to_objs[prompt].append(obj)
 
@@ -74,19 +78,15 @@ class Grounding2DPromptGenerator(BasePromptGenerator):
                     u, v, depth, ok = uvdok.transpose()
                     ok = ok.astype(bool)
 
-                    if sum(ok) < 6 or min(depth) < 0:
-                        continue
-
                     x_min, x_max = int(min(u)), int(max(u))
                     y_min, y_max = int(min(v)), int(max(v))
 
-                    x_min, x_max = [max(min(x, camera.width), 0) for x in [x_min, x_max]]
-                    y_min, y_max = [max(min(y, camera.height), 0) for y in [y_min, y_max]]
-
-                    width = x_max - x_min
-                    height = y_max - y_min
-                    if width < 32 or height < 32:
-                        continue
+                    x_min, x_max = [
+                        max(min(x, camera.width), 0) for x in [x_min, x_max]
+                    ]
+                    y_min, y_max = [
+                        max(min(y, camera.height), 0) for y in [y_min, y_max]
+                    ]
 
                     boxes.append([x_min, y_min, x_max, y_max])
                     object_ids.append(obj.id)
@@ -100,45 +100,28 @@ class Grounding2DPromptGenerator(BasePromptGenerator):
                                 box=box, score=1.0, prompt=prompt, object_id=obj_id
                             )
                             for box, obj_id in zip(boxes, object_ids)
+                            if obj_id not in self.sampled_object_ids
                         ],
                     )
                     prompt_entries.append(prompt_entry)
-
-                    # TODO: remove
-                    for box in boxes:
-                        x1, y1, x2, y2 = box
-                        color = (0, 255, 0)
-                        cv2.rectangle(img_vis, (x1, y1), (x2, y2), color, 3)
-
-                        draw_3d_wireframe_box_cv(img_vis, u, v, color=(255, 0, 0))
-
-                        # Add confidence text
-                        cv2.putText(
-                            img_vis,
-                            prompt,
-                            (x1, y1),
-                            cv2.FONT_HERSHEY_SIMPLEX,
-                            1,
-                            (255, 255, 255),
-                            2,
-                            cv2.LINE_AA,
-                        )
-
-                    cv2.imwrite(f"grounding.jpg", img_vis)
 
             if not prompt_entries:
                 continue
 
             multi_prompt_question = SingleImageMultiplePromptQuestion(
                 image_path=camera.image_path,
-                scene_id=scene.scene_id,
-                timestamp=timestamp,
+                scene_id=frame.scene_id,
+                timestamp=frame.timestamp,
                 camera_name=camera.name,
                 prompts=prompt_entries,
-                generator_name = f"{self.__class__.__module__}.{self.__class__.__name__}"
+                generator_name=f"{self.__class__.__module__}.{self.__class__.__name__}",
             )
 
-            samples.append((multi_prompt_question, None))  # or attach answers if needed
+            samples.append((multi_prompt_question, None))
+
+            for prompt_entry in prompt_entries:
+                for obj_id in prompt_entry.object_ids:
+                    self.sampled_object_ids.add(obj_id)
 
         return samples
 
@@ -150,6 +133,3 @@ class Grounding2DPromptGenerator(BasePromptGenerator):
 
     def get_metric_class(self):
         return COCOMetric
-    
-    def get_supported_methods(self) -> List[str]:
-        return ['frame', 'object']

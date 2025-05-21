@@ -10,16 +10,13 @@ from waymovqa.metrics.coco import COCOMetric
 
 class Grounding2DModel(ABC):
     @property
-    @abstractmethod
     def question_type(self):
         return SingleImageSingleObjectQuestion
 
     @property
-    @abstractmethod
     def answer_type(self):
         return Object2DAnswer
 
     @property
-    @abstractmethod
     def metric_type(self) -> Type[COCOMetric]:
         return COCOMetric
