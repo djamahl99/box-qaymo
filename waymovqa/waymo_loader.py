@@ -80,8 +80,7 @@ class WaymoDatasetLoader:
         """Load all objects with CVAT labels for a scene."""
         cvat_paths = list(self.object_lists_path.rglob("*_all_cvat_objects.txt"))
         
-        # TODO: uncomment after extracting objects again
-        # assert len(cvat_paths) == 202, f'got {len(cvat_paths)} cvat paths'
+        assert len(cvat_paths) == 202, f'got {len(cvat_paths)} cvat paths'
 
         # Track object_ids over all scenes with a set as there might be duplicates
         object_ids = set()

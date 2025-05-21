@@ -9,3 +9,5 @@ class SingleImageSingleObjectQuestion(BaseQuestion):
     scene_id: str
     timestamp: int
     camera_name: str
+    generator_name: str
+    

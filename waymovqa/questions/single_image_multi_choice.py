@@ -11,6 +11,7 @@ class SingleImageMultipleChoiceQuestion(BaseQuestion):
     scene_id: str
     timestamp: int
     camera_name: str
+    generator_name: str
     
 class SingleBase64ImageMultipleChoiceQuestion(BaseQuestion):
     question_type: QuestionType = QuestionType.SINGLE_IMAGE
@@ -20,3 +21,4 @@ class SingleBase64ImageMultipleChoiceQuestion(BaseQuestion):
     scene_id: str
     timestamp: int
     camera_name: str
+    generator_name: str

@@ -25,6 +25,7 @@ class QuestionType(str, Enum):
 class BaseQuestion(BaseModel):
     """Base class for all answer formats."""
 
+    generator_name: str
     question_type: QuestionType
 
     @classmethod

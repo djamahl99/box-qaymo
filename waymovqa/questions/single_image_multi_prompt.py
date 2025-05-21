@@ -16,3 +16,5 @@ class SingleImageMultiplePromptQuestion(BaseQuestion):
     timestamp: float
     camera_name: str
     prompts: List["PromptEntry"]
+    generator_name: str
+    

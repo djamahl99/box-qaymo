@@ -19,7 +19,11 @@ class BasePromptGenerator(Generic[TQ], ABC):
 
     @abstractmethod
     def generate(
-        self, scene: SceneInfo, objects: List[ObjectInfo], frame: FrameInfo = None
+        self, 
+        scene: Optional[SceneInfo] = None, 
+        objects: Optional[List[ObjectInfo]] = None, 
+        frame: Optional[FrameInfo] = None,
+        frames: Optional[List[FrameInfo]] = None
     ) -> List[Tuple[TQ, TA]]:
         """Generate VQA samples from scene, objects, and optionally a specific frame."""
         pass

@@ -9,3 +9,4 @@ class MultipleImageMultipleChoiceQuestion(BaseQuestion):
     scene_id: str
     timestamp: int
     camera_names: List[str]
+    generator_name: str
