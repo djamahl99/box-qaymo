@@ -118,9 +118,7 @@ class ObjectDrawnBoxPromptGenerator(BasePromptGenerator):
                 return 'down'
 
 
-    def generate(
-        self, scene: SceneInfo, objects: List[ObjectInfo], frame: FrameInfo = None
-    ) -> List[Tuple[SingleBase64ImageMultipleChoiceQuestion, MultipleChoiceAnswer]]:
+    def generate(self, scene, objects, frame, frames) -> List[Tuple[SingleBase64ImageMultipleChoiceQuestion, MultipleChoiceAnswer]]:
         """Generates questions about objects with bounding boxes drawn on the frame."""
         samples = []
         
@@ -202,7 +200,8 @@ class ObjectDrawnBoxPromptGenerator(BasePromptGenerator):
                         choices=choices,
                         scene_id=obj.scene_id,
                         timestamp=frame.timestamp,
-                        camera_name=camera.name
+                        camera_name=camera.name,
+                        generator_name=f"{self.__class__.__module__}.{self.__class__.__name__}",
                     )
                     
                     answer = MultipleChoiceAnswer(

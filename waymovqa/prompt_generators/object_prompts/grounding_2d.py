@@ -29,7 +29,11 @@ class Grounding2DPromptGenerator(BasePromptGenerator):
     """Generates questions about object locations with multiple prompts per image."""
 
     def generate(
-        self, scene: SceneInfo, objects: List[ObjectInfo], frame: FrameInfo
+        self, 
+        scene: Optional[SceneInfo] = None, 
+        objects: Optional[List[ObjectInfo]] = None, 
+        frame: Optional[FrameInfo] = None,
+        frames: Optional[List[FrameInfo]] = None
     ) -> List[Tuple[SingleImageMultiplePromptQuestion, BaseAnswer]]:
         samples = []
 
@@ -131,6 +135,7 @@ class Grounding2DPromptGenerator(BasePromptGenerator):
                 timestamp=timestamp,
                 camera_name=camera.name,
                 prompts=prompt_entries,
+                generator_name = f"{self.__class__.__module__}.{self.__class__.__name__}"
             )
 
             samples.append((multi_prompt_question, None))  # or attach answers if needed
@@ -138,10 +143,13 @@ class Grounding2DPromptGenerator(BasePromptGenerator):
         return samples
 
     def get_question_type(self):
-        return Object2DAnswer
+        return SingleImageMultiplePromptQuestion
 
     def get_answer_type(self):
         return Union[Object2DAnswer, MultiObject2DAnswer]
 
     def get_metric_class(self):
         return COCOMetric
+    
+    def get_supported_methods(self) -> List[str]:
+        return ['frame', 'object']

@@ -25,9 +25,7 @@ from waymovqa.primitives import colors as labelled_colors
 class ObjectColorPromptGenerator(BasePromptGenerator):
     """Generates questions about object colors."""
 
-    def generate(
-        self, scene: SceneInfo, objects: List[ObjectInfo], frame: FrameInfo = None
-    ) -> List[Tuple[SingleImageSingleObjectQuestion, MultipleChoiceAnswer]]:
+    def generate(self, scene, objects, frame, frames) -> List[Tuple[SingleImageSingleObjectQuestion, MultipleChoiceAnswer]]:
         """Generate color-based questions."""
         samples = []
 
@@ -36,7 +34,7 @@ class ObjectColorPromptGenerator(BasePromptGenerator):
 
         if frame is not None:
             # Filter objects that occur in the given timestamp
-            colored_objects = [obj for obj in objects if frame.timestamp in obj.frames]
+            colored_objects = [obj for obj in objects if frame.timestamp in obj.timestamp]
 
         if not colored_objects:
             return []
@@ -67,8 +65,9 @@ class ObjectColorPromptGenerator(BasePromptGenerator):
                     question=question,
                     object_id=obj.id,
                     scene_id=obj.scene_id,
-                    timestamp=timestamp,
-                    camera_name=camera.name
+                    timestamp=frame.timestamp,
+                    camera_name=camera.name,
+                    generator_name = f"{self.__class__.__module__}.{self.__class__.__name__}"
                 )
                 answer = MultipleChoiceAnswer(
                     choices=[x.lower() for x in labelled_colors],
@@ -79,10 +78,11 @@ class ObjectColorPromptGenerator(BasePromptGenerator):
 
         return samples
 
-    @abstractmethod
     def get_metric_class(self) -> str:
         return "MultipleChoiceMetric"
 
-    @abstractmethod
     def get_answer_type(self):
         return MultipleChoiceAnswer
+    
+    def get_supported_methods(self) -> List[str]:
+        return ['frame', 'object']

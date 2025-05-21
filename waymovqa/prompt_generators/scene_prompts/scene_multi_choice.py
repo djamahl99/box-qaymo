@@ -160,13 +160,13 @@ class BaseSceneChoicePromptGenerator(BasePromptGenerator):
         return MultipleChoiceMetric
 
     def get_supported_methods(self):
-        return ['scene', 'frame']
+        return ['scene']
 
 @register_prompt_generator
 class SceneMultipleImageMultiChoicePromptGenerator(BaseSceneChoicePromptGenerator):
     """Generates multi-image questions."""
     
-    def generate(self, scene, objects, frame=None):
+    def generate(self, scene, objects, frame, frames):
         # Multi-image specific implementation
         samples = self._generate_prompts(scene, objects, frame)
 
@@ -179,7 +179,8 @@ class SceneMultipleImageMultiChoicePromptGenerator(BaseSceneChoicePromptGenerato
                     choices=answer['choices'],
                     camera_names=question['camera_names'],
                     scene_id=question['scene_id'],
-                    timestamp=question['timestamp']
+                    timestamp=question['timestamp'],
+                    generator_name=f"{self.__class__.__module__}.{self.__class__.__name__}",
                 ),
                 MultipleChoiceAnswer(
                     choices=answer['choices'],
@@ -196,7 +197,7 @@ class SceneMultipleImageMultiChoicePromptGenerator(BaseSceneChoicePromptGenerato
 class SceneSingleImageMultiChoicePromptGenerator(BaseSceneChoicePromptGenerator):
     """Generates single-image questions."""
     
-    def generate(self, scene, objects, frame=None):
+    def generate(self, scene, objects, frame, frames):
         # Multi-image specific implementation
         samples = self._generate_prompts(scene, objects, frame)
 
@@ -217,7 +218,8 @@ class SceneSingleImageMultiChoicePromptGenerator(BaseSceneChoicePromptGenerator)
                     choices=answer['choices'],
                     camera_name=camera_name,
                     scene_id=question['scene_id'],
-                    timestamp=question['timestamp']
+                    timestamp=question['timestamp'],
+                        generator_name=f"{self.__class__.__module__}.{self.__class__.__name__}",
                 ),
                 MultipleChoiceAnswer(
                     choices=answer['choices'],

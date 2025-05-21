@@ -21,16 +21,12 @@ from waymovqa.answers.raw_text import RawTextAnswer
 class SceneDescriptionPromptGenerator(BasePromptGenerator):
     """Generates questions about overall scene description."""
 
-    def generate(
-        self, scene: SceneInfo, objects: List[ObjectInfo], frame: FrameInfo = None
-    ) -> List[Dict[str, Any]]:
+    def generate(self, scene, objects, frame, frames):
         """Generate scene description questions."""
         raise NotImplementedError
 
-    @abstractmethod
     def get_question_type(self):
         return MultipleImageQuestion
 
-    @abstractmethod
     def get_anser_type(self):
         return RawTextAnswer

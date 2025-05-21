@@ -21,14 +21,15 @@ from waymovqa.prompt_generators import register_prompt_generator
 class ObjectRelationPromptGenerator(BasePromptGenerator):
     """Generates questions about relationships between objects."""
     
-    def generate(self, scene: SceneInfo, objects: List[ObjectInfo], frame: FrameInfo = None) -> List[Dict[str, Any]]:
+    def generate(self, scene, objects, frame, frames):
         """Generate relationship questions."""
         raise NotImplementedError()
     
-    @abstractmethod
     def get_metric_class(self) -> str:
         return 'MultipleChoiceMetric'
     
-    @abstractmethod
     def get_answer_type(self):
         return MultipleChoiceAnswer
+    
+    def get_supported_methods(self):
+        return [] # TODO: nothing yet.

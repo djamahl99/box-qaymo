@@ -7,6 +7,7 @@ import cv2
 from collections import defaultdict
 from abc import ABC, abstractmethod
 
+from waymovqa.questions.single_image_single_object import SingleImageSingleObjectQuestion
 from waymovqa.answers.multiple_choice import MultipleChoiceAnswer
 from waymovqa.data.scene_info import SceneInfo
 from waymovqa.data.object_info import ObjectInfo
@@ -20,16 +21,18 @@ from waymovqa.prompt_generators import register_prompt_generator
 class ObjectLocationPromptGenerator(BasePromptGenerator):
     """Generates questions about object locations."""
 
-    def generate(
-        self, scene: SceneInfo, objects: List[ObjectInfo], frame: FrameInfo = None
-    ) -> List[Dict[str, Any]]:
+    def generate(self, scene, objects, frame, frames):
         """Generate location-based questions."""
         raise NotImplementedError()
     
-    @abstractmethod
     def get_metric_class(self) -> str:
         return "MultipleChoiceMetric"
 
-    @abstractmethod
+    def get_question_type(self):
+        return SingleImageSingleObjectQuestion
+
     def get_answer_type(self):
         return MultipleChoiceAnswer
+    
+    def get_supported_methods(self) -> List[str]:
+        return ['frame', 'object']
