@@ -3,6 +3,7 @@ from typing import Dict, List, Any, Optional, Union, Tuple
 import json
 import numpy as np
 import cv2
+from enum import Enum
 
 from waymovqa.data.base import DataObject
 
@@ -20,6 +21,15 @@ WAYMO_TYPE_MAPPING = {
     "TYPE_SIGN": "Sign",
     "TYPE_CYCLIST": "Cyclist",
 }
+
+
+class HeadingType(str, Enum):
+    TOWARDS = "towards"
+    AWAY = "away"
+    LEFT = "left"
+    RIGHT = "right"
+    UP = "up"
+    DOWN = "down"
 
 
 class ObjectInfo(DataObject):
@@ -255,7 +265,7 @@ class ObjectInfo(DataObject):
 
         return prompt
 
-    def get_object_description(self) -> Optional[str]:
+    def get_object_description(self) -> str:
         """Generates basic object description for question."""
         prompt = None
         if self.cvat_color and self.cvat_label:
@@ -265,7 +275,188 @@ class ObjectInfo(DataObject):
         elif self.get_simple_type() is not None:
             prompt = self.get_simple_type()
 
+        prompt = (
+            "object" if prompt is None else prompt
+        )  # very vague... hope it doesnt happen
+
         return prompt
+
+    def get_ego_relative_location_description(self, frame: "FrameInfo") -> str:
+        """
+        Returns a string like 'in front of the ego vehicle' based on object position in ego frame.
+        Assumes Waymo-like ego frame:
+            - X axis: left
+            - Y axis: forward
+            - Z axis: up
+        """
+        # Get 4x4 transformation matrix from world to ego
+        pose_matrix = np.array(frame.pose).reshape(4, 4)
+
+        # Transform object centre to ego frame
+        obj_center_world = np.concatenate(
+            [self.get_centre(), [1.0]]
+        )  # homogeneous coords
+        obj_center_ego = pose_matrix @ obj_center_world  # shape (4,)
+        obj_center_ego = obj_center_ego[:3]  # drop homogeneous component
+
+        # Use the X (left/right) and Y (forward/backward) coordinates
+        x, y = obj_center_ego[0], obj_center_ego[1]
+        angle = np.arctan2(x, y) * 180 / np.pi  # angle from front (Y-axis)
+
+        if -45 <= angle <= 45:
+            return "in front of the ego vehicle"
+        elif 45 < angle <= 135:
+            return "to the left of the ego vehicle"
+        elif -135 <= angle < -45:
+            return "to the right of the ego vehicle"
+        else:
+            return "behind the ego vehicle"
+
+    def is_visible_on_camera(self, frame: "FrameInfo", camera: "CameraInfo") -> bool:
+        """Generates a description for a specific object on a specific camera."""
+        uvdok = self.project_to_image(frame, camera)
+
+        # Extract projected coordinates
+        u, v, depth, ok = (
+            uvdok[..., 0],
+            uvdok[..., 1],
+            uvdok[..., 2],
+            uvdok[..., -1].astype(bool),
+        )
+
+        # Short-circuit if projection is invalid
+        return (
+            np.all(ok)
+            and np.all(depth > 0)
+            and all(u >= 0)
+            and all(v >= 0)
+            and all(u <= camera.width)
+            and all(v <= camera.height)
+        )
+
+    def is_visible_and_has_lidar_pts(
+        self, frame: "FrameInfo", camera: "CameraInfo"
+    ) -> bool:
+        """Generates a description for a specific object on a specific camera."""
+        return self.is_visible_on_camera(frame, camera) & (
+            self.num_lidar_points_in_box > 5
+        )
+
+    def get_detailed_object_description(
+        self, frame: "FrameInfo", camera: "CameraInfo"
+    ) -> str:
+        """Generates a description for a specific object on a specific camera."""
+        uvdok = self.project_to_image(frame, camera)
+
+        # Extract projected coordinates
+        u, v, depth, ok = (
+            uvdok[..., 0],
+            uvdok[..., 1],
+            uvdok[..., 2],
+            uvdok[..., -1].astype(bool),
+        )
+
+        # Short-circuit if projection is invalid
+        if not np.all(ok) or not np.all(depth > 0):
+            return self._basic_description(frame, camera)
+
+        # Ensure coordinates fall within image bounds
+        if not (
+            np.all((0 <= u) & (u <= camera.width))
+            and np.all((0 <= v) & (v <= camera.height))
+        ):
+            return self._basic_description(frame, camera)
+
+        # Calculate mean image position
+        u_mean, v_mean = u.mean(), v.mean()
+
+        # Avoid NaNs if projection is empty
+        if np.isnan(u_mean) or np.isnan(v_mean):
+            return self._basic_description(frame, camera)
+
+        # Determine image region (rule of thirds)
+        horiz = (
+            "left"
+            if u_mean < camera.width / 3
+            else "center" if u_mean < 2 * camera.width / 3 else "right"
+        )
+        vert = (
+            "top"
+            if v_mean < camera.height / 3
+            else "middle" if v_mean < 2 * camera.height / 3 else "bottom"
+        )
+        location_description = f"{vert}-{horiz}"
+
+        # Combine all parts
+        return f"{self.get_object_description()} in the {location_description} of the {camera.get_camera_name()} camera, {self._heading_text(frame, camera)}"
+
+    def _basic_description(self, frame: "FrameInfo", camera: "CameraInfo") -> str:
+        return f"{self.get_object_description()}, {self._heading_text(frame, camera)}"
+
+    def _heading_text(self, frame: "FrameInfo", camera: "CameraInfo") -> str:
+        ego_relative = self.get_ego_relative_location_description(frame)
+        camera_heading = self.get_camera_heading_text(camera, frame)
+        if camera_heading is not None:
+            return f"heading {camera_heading} in the {camera.get_camera_name()} camera, {ego_relative}"
+        else:
+            return f"in the {camera.get_camera_name()} camera, {ego_relative}"
+
+    def get_camera_heading_text(
+        self, camera: "CameraInfo", frame: "FrameInfo", include_z: bool = False
+    ) -> str:
+        """Returns heading choice -> returns one of 'towards', 'away', 'left', 'right'"""
+        if self.type == "TYPE_SIGN":
+            return None
+
+        obj_centre = self.get_centre().reshape(1, 3)
+
+        box = self.camera_synced_box if self.camera_synced_box is not None else self.box
+        # Create a point slightly ahead of the object in its heading direction
+        heading_angle = box["heading"]
+
+        heading_vector = np.array(
+            [np.cos(heading_angle), np.sin(heading_angle), 0.0]
+        ).reshape(1, 3)
+
+        # Scale the heading vector to a reasonable length
+        heading_vector = heading_vector * box["length"] * 0.5
+
+        # Create a new point by adding the heading vector to the object's position
+        ahead_point = obj_centre + heading_vector
+
+        # Project the points to camera coordinates
+        obj_centre_cam = camera.project_to_camera_xyz(obj_centre).reshape(3)
+        ahead_point_cam = camera.project_to_camera_xyz(ahead_point).reshape(3)
+
+        # Calculate movement vector in camera coordinates
+        vector = ahead_point_cam - obj_centre_cam
+
+        # Normalize the vector for direction determination
+        normalized_vector = vector.reshape(3) / np.linalg.norm(vector)
+
+        if not include_z:
+            # only left/right or towards/away (remove z axis)
+            normalized_vector = normalized_vector[:2]
+
+        # Find the dominant direction
+        max_axis = np.argmax(np.abs(normalized_vector))
+
+        if max_axis == 0:  # X-axis dominates (left-right)
+            if normalized_vector[max_axis] > 0:
+                return "away"
+            else:
+                return "towards"
+        elif max_axis == 1:  # Y-axis dominates (up-down)
+            if normalized_vector[max_axis] > 0:
+                return "left"
+            else:
+                return "right"
+
+        else:  # Z-axis dominates (towards-away)
+            if normalized_vector[max_axis] > 0:
+                return "up"
+            else:
+                return "down"
 
     def __repr__(self) -> str:
         text = f"Object #{self.id} timestamp={self.timestamp}"

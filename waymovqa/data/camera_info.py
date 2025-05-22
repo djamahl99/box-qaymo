@@ -35,6 +35,9 @@ class CameraInfo(DataObject):
         self.camera_trigger_time = None
         self.camera_readout_done_time = None
 
+    def get_camera_name(self):
+        return self.name.replace('_', ' ').lower()
+
     def project_to_camera_xyz(
         self,
         points: np.ndarray
@@ -51,7 +54,6 @@ class CameraInfo(DataObject):
         self,
         points: np.ndarray,
         frame_info: "FrameInfo",
-        camera_info: "CameraInfo",
         return_depth: bool = True,
     ) -> np.ndarray:
         from waymo_open_dataset.wdl_limited.camera.ops import py_camera_model_ops
@@ -71,7 +73,7 @@ class CameraInfo(DataObject):
         camera_info_frame = None
         if frame_info:
             for cam in frame_info.cameras:
-                if cam.name == camera_info.name:
+                if cam.name == self.name:
                     camera_info_frame = cam
                     break
 

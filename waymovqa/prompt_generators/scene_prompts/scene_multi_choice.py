@@ -13,6 +13,7 @@ from waymovqa.prompt_generators import BasePromptGenerator, register_prompt_gene
 from waymovqa.questions.multi_image_multi_choice import (
     MultipleImageMultipleChoiceQuestion,
 )
+from waymovqa.questions.single_image import SingleImageQuestion
 from waymovqa.questions.single_image_multi_choice import (
     SingleImageMultipleChoiceQuestion,
 )
@@ -213,6 +214,122 @@ class SceneMultipleImageMultiChoicePromptGenerator(BaseSceneChoicePromptGenerato
     def get_question_type(self):
         return MultipleImageMultipleChoiceQuestion
 
+    def visualise_sample(
+        self,
+        question_obj: SingleImageQuestion,
+        answer_obj: MultipleChoiceAnswer,
+        save_path,
+        frames,
+        figsize=(12, 8),
+        text_fontsize=12,
+        title_fontsize=14,
+        dpi=150,
+    ):
+        """
+        Simple visualization showing question, answer, and 2D bounding boxes for relevant objects.
+
+        Args:
+            question_obj: Question object with image_path and question text
+            answer_obj: MultipleChoiceAnswer object with yes/no answer
+            save_path: Path to save the visualization
+            frames
+            figsize: Figure size (width, height)
+            text_fontsize: Font size for question/answer text
+            title_fontsize: Font size for the title
+            dpi: DPI for saved image
+        """
+        import matplotlib.pyplot as plt
+        import matplotlib.patches as patches
+        from PIL import Image
+        import numpy as np
+        from pathlib import Path
+        import textwrap
+
+        # Create figure
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
+
+        idx = question_obj.camera_names.index("FRONT")
+
+        image_path = question_obj.image_paths[idx]
+        camera_name = question_obj.camera_names[idx]
+
+        # Load and display the image
+        try:
+            img = Image.open(image_path)
+            img_array = np.array(img)
+            ax.imshow(img_array)
+
+        except Exception as e:
+            # If image can't be loaded, show error
+            ax.text(
+                0.5,
+                0.5,
+                f"Image not found:\n{image_path}",
+                transform=ax.transAxes,
+                ha="center",
+                va="center",
+                fontsize=text_fontsize,
+                color="red",
+            )
+            ax.set_xlim(0, 1)
+            ax.set_ylim(0, 1)
+
+        ax.axis("off")
+
+        # Extract answer info
+        answer_text = answer_obj.answer.lower()
+
+        # Set colors based on answer
+        if answer_text == "yes":
+            answer_color = "green"
+            answer_symbol = "✓"
+        else:
+            answer_color = "red"
+            answer_symbol = "✗"
+
+        # Add text overlay for question
+        question_text = textwrap.fill(question_obj.question, width=60)
+        ax.text(
+            0.02,
+            0.98,
+            f"Q: {question_text}",
+            transform=ax.transAxes,
+            fontsize=text_fontsize,
+            verticalalignment="top",
+            bbox=dict(boxstyle="round,pad=0.5", facecolor="white", alpha=0.9),
+        )
+
+        # Add answer overlay
+        answer_display = f"A: {answer_text.upper()} {answer_symbol}"
+        ax.text(
+            0.02,
+            0.02,
+            answer_display,
+            transform=ax.transAxes,
+            fontsize=text_fontsize + 2,
+            weight="bold",
+            verticalalignment="bottom",
+            bbox=dict(
+                boxstyle="round,pad=0.5",
+                facecolor=answer_color,
+                alpha=0.8,
+                edgecolor=answer_color,
+            ),
+        )
+
+        # Title
+        plt.title(
+            f"Scene Single Image Multi Choice - {camera_name}",
+            fontsize=title_fontsize,
+            pad=20,
+        )
+
+        # Save
+        save_path = Path(save_path)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(save_path, dpi=dpi, bbox_inches="tight", facecolor="white")
+        plt.close()
+
 
 @register_prompt_generator
 class SceneSingleImageMultiChoicePromptGenerator(BaseSceneChoicePromptGenerator):
@@ -256,6 +373,118 @@ class SceneSingleImageMultiChoicePromptGenerator(BaseSceneChoicePromptGenerator)
             )
 
         return samples_parsed
+
+    def visualise_sample(
+        self,
+        question_obj: SingleImageMultipleChoiceQuestion,
+        answer_obj: MultipleChoiceAnswer,
+        save_path,
+        frames,
+        figsize=(12, 8),
+        text_fontsize=12,
+        title_fontsize=14,
+        dpi=150,
+    ):
+        """
+        Simple visualization showing question, answer, and 2D bounding boxes for relevant objects.
+
+        Args:
+            question_obj: Question object with image_path and question text
+            answer_obj: MultipleChoiceAnswer object with yes/no answer
+            save_path: Path to save the visualization
+            frames
+            figsize: Figure size (width, height)
+            text_fontsize: Font size for question/answer text
+            title_fontsize: Font size for the title
+            dpi: DPI for saved image
+        """
+        import matplotlib.pyplot as plt
+        import matplotlib.patches as patches
+        from PIL import Image
+        import numpy as np
+        from pathlib import Path
+        import textwrap
+
+        # Create figure
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
+
+        # Load and display the image
+        try:
+            img = Image.open(question_obj.image_path)
+            img_array = np.array(img)
+            ax.imshow(img_array)
+
+        except Exception as e:
+            # If image can't be loaded, show error
+            ax.text(
+                0.5,
+                0.5,
+                f"Image not found:\n{question_obj.image_path}",
+                transform=ax.transAxes,
+                ha="center",
+                va="center",
+                fontsize=text_fontsize,
+                color="red",
+            )
+            ax.set_xlim(0, 1)
+            ax.set_ylim(0, 1)
+
+        ax.axis("off")
+
+        # Extract answer info
+        answer_text = answer_obj.answer.lower()
+
+        # Set colors based on answer
+        if answer_text == "yes":
+            answer_color = "green"
+            answer_symbol = "✓"
+        else:
+            answer_color = "red"
+            answer_symbol = "✗"
+
+        # Add text overlay for question
+        question_text = textwrap.fill(question_obj.question, width=60)
+        ax.text(
+            0.02,
+            0.98,
+            f"Q: {question_text}",
+            transform=ax.transAxes,
+            fontsize=text_fontsize,
+            verticalalignment="top",
+            bbox=dict(boxstyle="round,pad=0.5", facecolor="white", alpha=0.9),
+        )
+
+        # Add answer overlay
+        answer_display = f"A: {answer_text.upper()} {answer_symbol}"
+        ax.text(
+            0.02,
+            0.02,
+            answer_display,
+            transform=ax.transAxes,
+            fontsize=text_fontsize + 2,
+            weight="bold",
+            verticalalignment="bottom",
+            bbox=dict(
+                boxstyle="round,pad=0.5",
+                facecolor=answer_color,
+                alpha=0.8,
+                edgecolor=answer_color,
+            ),
+        )
+
+        # Title
+        camera_name = getattr(question_obj, "camera_name", "Unknown")
+        plt.title(
+            f"Scene Single Image Multi Choice - {camera_name}",
+            fontsize=title_fontsize,
+            pad=20,
+        )
+
+        # Save
+        save_path = Path(save_path)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(save_path, dpi=dpi, bbox_inches="tight", facecolor="white")
+        plt.close()
 
     def get_question_type(self):
         return SingleImageMultipleChoiceQuestion

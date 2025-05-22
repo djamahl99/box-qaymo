@@ -77,7 +77,28 @@ class VQAGenerator:
         """Find scenes to sample from."""
         return self.loader.get_scene_ids()
 
-    def generate_dataset(self, total_samples: int = 500, balance_answers: bool = True):
+    def _visualise_sample(
+        self, generator: BasePromptGenerator, sample, frames: List[FrameInfo]
+    ):
+        save_dir = self.dataset_path / "visualisation"
+        save_dir.mkdir(exist_ok=True)
+
+        generator_save_dir = save_dir / f"{generator.__class__.__name__}"
+        generator_save_dir.mkdir(exist_ok=True)
+
+        question_save_path = (
+            generator_save_dir / f"{hash(sample[0])}.png"
+        )  # hash the question as the filename
+
+        question_obj, answer_obj = sample
+        generator.visualise_sample(question_obj, answer_obj, question_save_path, frames)
+
+    def generate_dataset(
+        self,
+        total_samples: int = 500,
+        balance_answers: bool = True,
+        visualise: bool = False,
+    ):
         """Generate VQA dataset."""
         all_samples = []
 
@@ -97,6 +118,19 @@ class VQAGenerator:
                 # Apply each generator to all frames
                 for generator in self.prompt_generators:
                     samples = generator.generate(frames)
+
+                    if len(samples) == 0:
+                        print(
+                            f"{generator.__class__.__name__} generated no samples for {scene_id}"
+                        )
+
+                    if visualise and len(samples) > 0:
+                        for vis_idx in np.random.choice(
+                            len(samples), min(5, len(samples)), replace=False
+                        ):
+                            vis_sample = samples[vis_idx]
+                            self._visualise_sample(generator, vis_sample, frames)
+
                     all_samples.extend(samples)
 
                 if len(all_samples) >= total_samples * 1.5:
@@ -219,16 +253,16 @@ def main():
         required=True,
         help="Path to processed waymo dataset",
     )
-    parser.add_argument(
-        "--save_path", type=str, required=True, help="Path to save dataset"
-    )
+    # parser.add_argument(
+    #     "--save_path", type=str, required=True, help="Path to save dataset"
+    # )
     parser.add_argument(
         "--model", type=str, default=None, required=False, help="Model name"
     )
     parser.add_argument(
         "--total_samples",
-        type=int,
-        default=500,
+        type=float,
+        default=float("inf"),
         help="Total number of samples for object-based generation",
     )
     parser.add_argument(
@@ -239,7 +273,7 @@ def main():
         help="Specific prompt generators to use (by name)",
     )
     parser.add_argument(
-        "--analyze", action="store_true", help="Analyze generated dataset"
+        "--visualise", action="store_true", help="Visualise generated dataset"
     )
 
     args = parser.parse_args()
@@ -254,14 +288,18 @@ def main():
         dataset_path=args.dataset_path, prompt_generators=args.generators, model=model
     )
 
+    print("args.total_samples", args.total_samples)
+
     # Generate dataset
-    generator.generate_dataset(total_samples=args.total_samples)
+    generator.generate_dataset(
+        total_samples=args.total_samples, visualise=args.visualise
+    )
 
-    output_path = Path(args.save_path)
-
+    # output_path = Path(args.save_path)
+    output_dir = Path(args.dataset_path) / "generated_vqa_samples"
     # Save dataset
     for split_name, dataset in generator.datasets.items():
-        split_save_path = output_path.with_name(f"{output_path.stem}_{split_name}.json")
+        split_save_path = output_dir / f"{split_name}.json"
 
         print(f"Saving {split_name} to {split_save_path}")
 

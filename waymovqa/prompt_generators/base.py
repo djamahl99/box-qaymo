@@ -151,3 +151,18 @@ class BasePromptGenerator(Generic[TQ], ABC):
 
         # Return a visibility score (combination of size and LiDAR points)
         return width * height * obj.num_lidar_points_in_box
+
+    @abstractmethod
+    def visualise_sample(
+        self,
+        question_obj: BaseQuestion,
+        answer_obj: BaseAnswer,
+        save_path,
+        frames,
+        figsize=(12, 8),
+        box_color="green",
+        text_fontsize=12,
+        title_fontsize=14,
+        dpi=150,
+    ):
+        pass

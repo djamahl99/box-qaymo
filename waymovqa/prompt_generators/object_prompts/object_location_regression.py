@@ -19,7 +19,6 @@ from waymovqa.prompt_generators.base import BasePromptGenerator
 from waymovqa.prompt_generators import register_prompt_generator
 
 
-@register_prompt_generator
 class SingleImageObjectLocationPromptGenerator(BasePromptGenerator):
     """Generates questions about object locations relative to the ego vehicle."""
 
@@ -137,6 +136,117 @@ class SingleImageObjectLocationPromptGenerator(BasePromptGenerator):
                 )
 
         return samples
+
+    def visualise_sample(
+        self,
+        question_obj: SingleImageQuestion,
+        answer_obj: RegressionAnswer,
+        save_path,
+        frames,
+        figsize=(12, 8),
+        text_fontsize=12,
+        title_fontsize=14,
+        dpi=150,
+    ):
+        """
+        Simple visualization showing question, answer, and 2D bounding boxes for relevant objects.
+
+        Args:
+            question_obj: Question object with image_path and question text
+            answer_obj: RegressionAnswer
+            save_path: Path to save the visualization
+            frames
+            figsize: Figure size (width, height)
+            text_fontsize: Font size for question/answer text
+            title_fontsize: Font size for the title
+            dpi: DPI for saved image
+        """
+        import matplotlib.pyplot as plt
+        import matplotlib.patches as patches
+        from PIL import Image
+        import numpy as np
+        from pathlib import Path
+        import textwrap
+
+        # Create figure
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
+
+        # Load and display the image
+        try:
+            img = Image.open(question_obj.image_path)
+            img_array = np.array(img)
+            ax.imshow(img_array)
+
+        except Exception as e:
+            # If image can't be loaded, show error
+            ax.text(
+                0.5,
+                0.5,
+                f"Image not found:\n{question_obj.image_path}",
+                transform=ax.transAxes,
+                ha="center",
+                va="center",
+                fontsize=text_fontsize,
+                color="red",
+            )
+            ax.set_xlim(0, 1)
+            ax.set_ylim(0, 1)
+
+        ax.axis("off")
+
+        # Extract answer info
+        answer_value = answer_obj.value
+
+        # Format answer based on magnitude
+        if answer_value == int(answer_value):
+            answer_text = f"{int(answer_value)}"
+        else:
+            answer_text = f"{answer_value:.2f}"
+        answer_color = "green"
+
+        # Add text overlay for question
+        question_text = textwrap.fill(question_obj.question, width=60)
+        ax.text(
+            0.02,
+            0.98,
+            f"Q: {question_text}",
+            transform=ax.transAxes,
+            fontsize=text_fontsize,
+            verticalalignment="top",
+            bbox=dict(boxstyle="round,pad=0.5", facecolor="white", alpha=0.9),
+        )
+
+        # Add answer overlay
+        answer_display = f"A: {answer_text}"
+        ax.text(
+            0.02,
+            0.02,
+            answer_display,
+            transform=ax.transAxes,
+            fontsize=text_fontsize + 2,
+            weight="bold",
+            verticalalignment="bottom",
+            bbox=dict(
+                boxstyle="round,pad=0.5",
+                facecolor=answer_color,
+                alpha=0.8,
+                edgecolor=answer_color,
+            ),
+        )
+
+        # Title
+        camera_name = getattr(question_obj, "camera_name", "Unknown")
+        plt.title(
+            f"ObjectLocationPromptGenerator - {camera_name}",
+            fontsize=title_fontsize,
+            pad=20,
+        )
+
+        # Save
+        save_path = Path(save_path)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(save_path, dpi=dpi, bbox_inches="tight", facecolor="white")
+        plt.close()
 
     def get_metric_class(self) -> str:
         return "RegressionMetric"

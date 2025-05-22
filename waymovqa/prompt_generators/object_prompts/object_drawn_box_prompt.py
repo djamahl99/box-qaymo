@@ -9,13 +9,14 @@ from collections import defaultdict
 from abc import ABC, abstractmethod
 import base64
 from enum import Enum
+from io import BytesIO
 
 from waymovqa.answers.multiple_choice import MultipleChoiceAnswer
 from waymovqa.questions.single_image_multi_choice import (
     SingleBase64ImageMultipleChoiceQuestion,
 )
 from waymovqa.data.scene_info import SceneInfo
-from waymovqa.data.object_info import ObjectInfo
+from waymovqa.data.object_info import HeadingType, ObjectInfo
 from waymovqa.data.frame_info import FrameInfo
 from waymovqa.data.camera_info import CameraInfo
 from waymovqa.data.laser_info import LaserInfo
@@ -36,15 +37,6 @@ from waymovqa.prompt_generators.templates import (
 )
 
 
-class HeadingType(str, Enum):
-    TOWARDS = "towards"
-    AWAY = "away"
-    LEFT = "left"
-    RIGHT = "right"
-    UP = "up"
-    DOWN = "down"
-
-
 @register_prompt_generator
 class ObjectDrawnBoxPromptGenerator(BasePromptGenerator):
     """Generates questions about objects highlighted in te image."""
@@ -55,61 +47,14 @@ class ObjectDrawnBoxPromptGenerator(BasePromptGenerator):
         self.ATTRIBUTE_CONFIGS = [
             (labelled_colors, "cvat_color", COLOR_QUESTIONS_CHOICES, None),
             (finegrained_labels, "cvat_label", LABEL_QUESTIONS_CHOICES, None),
-            (HeadingType, None, HEADING_QUESTIONS_CHOICES, self._heading_function),
+            (
+                HeadingType,
+                None,
+                HEADING_QUESTIONS_CHOICES,
+                lambda obj, camera, frame: obj.get_camera_heading_text(camera, frame),
+            ),
+            # TODO: movement
         ]
-
-    def _heading_function(
-        self, obj: ObjectInfo, camera: CameraInfo, frame: FrameInfo
-    ) -> str:
-        """Returns heading choice -> returns one of 'towards', 'away', 'left', 'right'"""
-        if obj.type == "TYPE_SIGN":
-            return None
-
-        obj_centre = obj.get_centre().reshape(1, 3)
-
-        box = obj.camera_synced_box if obj.camera_synced_box is not None else obj.box
-        # Create a point slightly ahead of the object in its heading direction
-        heading_angle = box["heading"]
-
-        heading_vector = np.array(
-            [np.cos(heading_angle), np.sin(heading_angle), 0.0]
-        ).reshape(1, 3)
-
-        # Scale the heading vector to a reasonable length
-        heading_vector = heading_vector * box["length"] * 0.5
-
-        # Create a new point by adding the heading vector to the object's position
-        ahead_point = obj_centre + heading_vector
-
-        # Project the points to camera coordinates
-        obj_centre_cam = camera.project_to_camera_xyz(obj_centre).reshape(3)
-        ahead_point_cam = camera.project_to_camera_xyz(ahead_point).reshape(3)
-
-        # Calculate movement vector in camera coordinates
-        vector = ahead_point_cam - obj_centre_cam
-
-        # Normalize the vector for direction determination
-        normalized_vector = vector.reshape(3) / np.linalg.norm(vector)
-
-        # Find the dominant direction
-        max_axis = np.argmax(np.abs(normalized_vector))
-
-        if max_axis == 0:  # X-axis dominates (left-right)
-            if normalized_vector[max_axis] > 0:
-                return "away"
-            else:
-                return "towards"
-        elif max_axis == 1:  # Y-axis dominates (up-down)
-            if normalized_vector[max_axis] > 0:
-                return "left"
-            else:
-                return "right"
-
-        else:  # Z-axis dominates (towards-away)
-            if normalized_vector[max_axis] > 0:
-                return "up"
-            else:
-                return "down"
 
     def generate(
         self, frames
@@ -169,7 +114,7 @@ class ObjectDrawnBoxPromptGenerator(BasePromptGenerator):
                 question_text = question_template.format(formatted_options)
 
                 question = SingleBase64ImageMultipleChoiceQuestion(
-                    image_bas64=img_base64,
+                    image_base64=img_base64,
                     question=question_text,
                     choices=choices,
                     scene_id=obj.scene_id,
@@ -186,6 +131,124 @@ class ObjectDrawnBoxPromptGenerator(BasePromptGenerator):
                 samples.append((question, answer))
 
         return samples
+
+    def visualise_sample(
+        self,
+        question_obj: SingleBase64ImageMultipleChoiceQuestion,
+        answer_obj: MultipleChoiceAnswer,
+        save_path,
+        frames,
+        figsize=(12, 8),
+        box_color="green",
+        text_fontsize=12,
+        title_fontsize=14,
+        dpi=150,
+    ):
+        """
+        Simple visualization showing question, choices over image with drawn object.
+
+        Args:
+            question_obj: Question object with image_path and question text
+            answer_obj: MultipleChoiceAnswer
+            save_path: Path to save the visualization
+            frames:
+            figsize: Figure size (width, height)
+            box_color: Color for bounding boxes
+            text_fontsize: Font size for question/answer text
+            title_fontsize: Font size for the title
+            dpi: DPI for saved image
+        """
+        import matplotlib.pyplot as plt
+        import matplotlib.patches as patches
+        from PIL import Image
+        import numpy as np
+        from pathlib import Path
+        import textwrap
+        import base64
+        from io import BytesIO
+
+        # Create figure
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
+
+        # Load and display the image
+        try:
+            img = Image.open(BytesIO(base64.b64decode(question_obj.image_base64)))
+            img_array = np.array(img)
+            ax.imshow(img_array)
+
+        except Exception as e:
+            # If image can't be loaded, show error
+            ax.text(
+                0.5,
+                0.5,
+                f"Image could not be decoded: {str(e)}",
+                transform=ax.transAxes,
+                ha="center",
+                va="center",
+                fontsize=text_fontsize,
+                color="red",
+            )
+            ax.set_xlim(0, 1)
+            ax.set_ylim(0, 1)
+
+        ax.axis("off")
+
+        # Get question text
+        question_text = question_obj.question
+
+        # Add text overlay for question
+        question_text = textwrap.fill(question_text, width=60)
+        ax.text(
+            0.02,
+            0.98,
+            f"Q: {question_text}",
+            transform=ax.transAxes,
+            fontsize=text_fontsize,
+            verticalalignment="top",
+            bbox=dict(boxstyle="round,pad=0.5", facecolor="white", alpha=0.9),
+        )
+
+        # Display choices and highlight the correct answer
+        for idx, choice in enumerate(answer_obj.choices):
+            if choice == answer_obj.answer:
+                choice_color = "lightgreen"
+                choice_text = f"✓ {choice} (CORRECT)"
+                text_color = "darkgreen"
+            else:
+                choice_color = "lightcoral"
+                choice_text = f"✗ {choice}"
+                text_color = "darkred"
+
+            ax.text(
+                0.02,
+                0.02 + idx * 0.06,  # Better spacing
+                choice_text,
+                transform=ax.transAxes,
+                fontsize=text_fontsize,
+                weight="bold",
+                verticalalignment="bottom",
+                color=text_color,
+                bbox=dict(
+                    boxstyle="round,pad=0.4",
+                    facecolor=choice_color,
+                    alpha=0.8,
+                    edgecolor=text_color,
+                ),
+            )
+
+        # Title
+        camera_name = getattr(question_obj, "camera_name", "Unknown")
+        plt.title(
+            f"Object Drawn Box QA - {camera_name}",
+            fontsize=title_fontsize,
+            pad=20,
+        )
+
+        # Save
+        save_path = Path(save_path)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(save_path, dpi=dpi, bbox_inches="tight", facecolor="white")
+        plt.close()
 
     def get_metric_class(self) -> str:
         return "MultipleChoiceMetric"
