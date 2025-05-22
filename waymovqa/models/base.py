@@ -4,6 +4,7 @@ from waymovqa.questions.base import BaseQuestion
 from waymovqa.answers.base import BaseAnswer
 from waymovqa.metrics.base import BaseMetric
 
+
 class BaseModel(ABC):
     @property
     @abstractmethod

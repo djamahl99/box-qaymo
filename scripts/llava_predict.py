@@ -91,7 +91,7 @@ def generate_responses_for_inputs(text_strs, image_paths, args):
     responses = []
 
     for text, image_path in zip(text_strs, image_paths):
-        
+
         inp = text
         if image_path is not None:
             image = load_image(image_path)
@@ -150,7 +150,7 @@ def generate_responses_for_inputs(text_strs, image_paths, args):
 
 def run_on_dataset(
     gt_dataset: VQADataset,
-    args, 
+    args,
     dataset_path: Path,
     save_path: Path,
     batch_size=1,
@@ -280,39 +280,54 @@ def process_batch(
 ):
     """Helper function to process a batch of inputs using proper batching"""
     # Load all images in batch
-    images = [load_image(path) if path is not None else None for path in batch_image_paths]
-    image_tensors = torch.cat([
-        image_processor.preprocess(img, return_tensors="pt")["pixel_values"].half()
-        for img in images if img is not None
-    ]).cuda()
-    
+    images = [
+        load_image(path) if path is not None else None for path in batch_image_paths
+    ]
+    image_tensors = torch.cat(
+        [
+            image_processor.preprocess(img, return_tensors="pt")["pixel_values"].half()
+            for img in images
+            if img is not None
+        ]
+    ).cuda()
+
     # Prepare all inputs in batch
     input_ids_list = []
     image_indices = []  # To track which image goes with which input
-    
+
     for i, (text, image_path) in enumerate(zip(batch_text_strs, batch_image_paths)):
         # Create a fresh conversation for each input to avoid contamination
         conv = conv_template.copy()
-        
+
         inp = text
         if image_path is not None:
             if model.config.mm_use_im_start_end:
-                inp = DEFAULT_IM_START_TOKEN + DEFAULT_IMAGE_TOKEN + DEFAULT_IM_END_TOKEN + "\n" + inp
+                inp = (
+                    DEFAULT_IM_START_TOKEN
+                    + DEFAULT_IMAGE_TOKEN
+                    + DEFAULT_IM_END_TOKEN
+                    + "\n"
+                    + inp
+                )
             else:
                 inp = DEFAULT_IMAGE_TOKEN + "\n" + inp
-            
+
             conv.append_message(conv.roles[0], inp)
             image_indices.append(i)  # Record which image this prompt uses
         else:
             conv.append_message(conv.roles[0], inp)
-        
+
         prompt = conv.get_prompt()
-        input_ids = tokenizer_image_token(
-            prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors="pt"
-        ).unsqueeze(0).cuda()
-        
+        input_ids = (
+            tokenizer_image_token(
+                prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors="pt"
+            )
+            .unsqueeze(0)
+            .cuda()
+        )
+
         input_ids_list.append(input_ids)
-    
+
     # Process all inputs in one batch
     responses = []
     for i, input_ids in enumerate(input_ids_list):
@@ -322,10 +337,14 @@ def process_batch(
         keywords = [stop_str]
         stopping_criteria = KeywordsStoppingCriteria(keywords, tokenizer, input_ids)
         streamer = TextStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
-        
+
         # Get the correct image tensor for this input
-        img_tensor = image_tensors[image_indices.index(i)].unsqueeze(0) if i in image_indices else None
-        
+        img_tensor = (
+            image_tensors[image_indices.index(i)].unsqueeze(0)
+            if i in image_indices
+            else None
+        )
+
         with torch.inference_mode():
             output_ids = model.generate(
                 input_ids,
@@ -337,13 +356,15 @@ def process_batch(
                 use_cache=True,
                 stopping_criteria=[stopping_criteria],
             )
-        
+
         # outputs = tokenizer.decode(output_ids[0, input_ids.shape[1]:])
-        outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
+        outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[
+            0
+        ].strip()
 
         print(batch_text_strs[i])
         print(f"OUTPUT:", outputs)
-        with open(f'raw_output_{i}.txt', 'w') as f:
+        with open(f"raw_output_{i}.txt", "w") as f:
             f.write(outputs)
 
         responses.append(outputs)
@@ -384,28 +405,30 @@ def parse_multiple_choice_response(response: str, choices: List[str]) -> str:
     """
     response = response.lower().strip()
     normalized_choices = [choice.lower() for choice in choices]
-    
+
     # Check for exact phrase matches first (most reliable)
     for i, choice in enumerate(normalized_choices):
         pattern = f"(^|[^a-z0-9])(option|choice|answer)?\s*{i+1}([^a-z0-9]|$)"
         if re.search(pattern, response):
             return choices[i]
-    
+
     # Check for exact choice text
     for i, choice in enumerate(normalized_choices):
         if re.search(f"(^|[^a-z0-9]){re.escape(choice)}([^a-z0-9]|$)", response):
             return choices[i]
-    
+
     # Check for partial matches, sorted by length (longest first to avoid substring issues)
-    sorted_choices = sorted(range(len(choices)), key=lambda i: len(normalized_choices[i]), reverse=True)
+    sorted_choices = sorted(
+        range(len(choices)), key=lambda i: len(normalized_choices[i]), reverse=True
+    )
     for i in sorted_choices:
         if normalized_choices[i] in response:
             return choices[i]
-    
+
     # Fallback to similarity for truly ambiguous cases
     if compute_text_similarity:  # Assuming this function exists
         return max(choices, key=lambda x: compute_text_similarity(x.lower(), response))
-    
+
     return "AMBIGUOUS_RESPONSE"
 
 

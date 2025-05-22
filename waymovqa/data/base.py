@@ -4,6 +4,7 @@ import json
 import numpy as np
 import cv2
 
+
 class DataObject:
     """Base class for all data objects."""
 

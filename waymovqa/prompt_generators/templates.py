@@ -14,18 +14,12 @@ HEADING_QUESTIONS_CHOICES = [
     "How would you describe the heading of the highlighted object? Choose from {}."
 ]
 
-HEADING_QUESTIONS_COUNT_SINGLE_IMAGE = [
-    "How many objects are heading {} in the image?"
-]
+HEADING_QUESTIONS_COUNT_SINGLE_IMAGE = ["How many objects are heading {} in the image?"]
 
 HEADING_QUESTIONS_BINARY_SINGLE_IMAGE = [
     "Are there any objects heading {} in the image?"
 ]
 
-WAYMO_TYPE_COUNT_QUESTIONS = [
-    "How many {} are there in the image?"
-]
+WAYMO_TYPE_COUNT_QUESTIONS = ["How many {} are there in the image?"]
 
-WAYMO_TYPE_BINARY_QUESTIONS = [
-    "Are there any {} in the image?"
-]
+WAYMO_TYPE_BINARY_QUESTIONS = ["Are there any {} in the image?"]

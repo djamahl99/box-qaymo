@@ -92,7 +92,7 @@ def convert_frame_to_dict(
     frame_info["time_of_day"] = frame.context.stats.time_of_day
     frame_info["weather"] = frame.context.stats.weather
     frame_info["location"] = frame.context.stats.location
-    
+
     frame_info["pose"] = np.reshape(
         np.array(frame.pose.transform, np.float32), (4, 4)
     ).tolist()
@@ -185,7 +185,9 @@ def convert_frame_to_dict(
                 "metadata": {
                     "width": int(calibration.width),
                     "height": int(calibration.height),
-                    "rolling_shutter_direction": int(calibration.rolling_shutter_direction),
+                    "rolling_shutter_direction": int(
+                        calibration.rolling_shutter_direction
+                    ),
                 },
                 "pose": np.reshape(
                     np.array(im.pose.transform, np.float32), (4, 4)
@@ -292,7 +294,9 @@ def convert_frame_to_dict(
         ):
             visible_cameras_for_obj.append(label.most_visible_camera_name)
 
-        if len(label.most_visible_camera_name) == 0: # not visible on camera -> don't bother extracting
+        if (
+            len(label.most_visible_camera_name) == 0
+        ):  # not visible on camera -> don't bother extracting
             continue
 
         obj_info = {
@@ -396,7 +400,8 @@ def convert_frame_to_dict(
 
         # Create a new file with scene ID and timestamp in the name
         obj_path = (
-            paths_dict["object_infos"] / f"object_{object_id}_{scene_id}_{timestamp}.json"
+            paths_dict["object_infos"]
+            / f"object_{object_id}_{scene_id}_{timestamp}.json"
         )
         with open(obj_path, "w") as f:
             json.dump(obj_info, f, indent=2)
@@ -670,6 +675,7 @@ def process_tfrecord(
 
         traceback.print_exc()
         return 0
+
 
 def setup_processing_paths(
     output_path: Path, data_dir: Path = Path("data")

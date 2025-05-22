@@ -43,6 +43,7 @@ def draw_3d_wireframe_box_cv(img, u, v, color, thickness=3):
 
     return img
 
+
 def is_face_visible(face, verts_cam):
     a, b, c = [verts_cam[i] for i in face[:3]]
     normal = np.cross(b - a, c - a)
@@ -50,7 +51,9 @@ def is_face_visible(face, verts_cam):
     return np.dot(normal, view_dir) < 0
 
 
-def colorize_and_save_depth_buffer(depth_buffer, output_path, colormap=cv2.COLORMAP_JET):
+def colorize_and_save_depth_buffer(
+    depth_buffer, output_path, colormap=cv2.COLORMAP_JET
+):
     """
     Colorizes a depth buffer and saves it as an image.
 
@@ -64,13 +67,17 @@ def colorize_and_save_depth_buffer(depth_buffer, output_path, colormap=cv2.COLOR
     """
     # Replace infinite values with a large number (for visualization purposes)
     if np.isfinite(depth_buffer).sum() > 0:
-        depth_buffer[np.isinf(depth_buffer)] = np.max(depth_buffer[np.isfinite(depth_buffer)])
+        depth_buffer[np.isinf(depth_buffer)] = np.max(
+            depth_buffer[np.isfinite(depth_buffer)]
+        )
     else:
         # all inf
         depth_buffer[:, :] = 0.0
 
     # Normalize the depth buffer to the range [0, 255]
-    normalized_depth = cv2.normalize(depth_buffer, None, 0, 255, norm_type=cv2.NORM_MINMAX).astype(np.uint8)
+    normalized_depth = cv2.normalize(
+        depth_buffer, None, 0, 255, norm_type=cv2.NORM_MINMAX
+    ).astype(np.uint8)
 
     # Apply a colormap
     colorized_depth = cv2.applyColorMap(normalized_depth, colormap)
@@ -80,8 +87,11 @@ def colorize_and_save_depth_buffer(depth_buffer, output_path, colormap=cv2.COLOR
 
     return colorized_depth
 
+
 def generate_object_depth_buffer(frame, camera):
-    depth_buffer = np.full((camera.height, camera.width), np.inf, dtype=np.float32)  # Z-buffer for occlusion handling
+    depth_buffer = np.full(
+        (camera.height, camera.width), np.inf, dtype=np.float32
+    )  # Z-buffer for occlusion handling
 
     for obj in frame.objects:
         # obj projected to the camera
@@ -108,11 +118,8 @@ def generate_object_depth_buffer(frame, camera):
         update_mask = (mask == 255) & (depth_buffer > depth_mean)
         depth_buffer[update_mask] = depth_mean
 
-    print('depth_buffer', depth_buffer.shape)
+    print("depth_buffer", depth_buffer.shape)
 
-    colorize_and_save_depth_buffer(depth_buffer, 'depth.png')
+    colorize_and_save_depth_buffer(depth_buffer, "depth.png")
 
     return depth_buffer
-
-
-                

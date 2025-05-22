@@ -1,6 +1,7 @@
 import sys
 import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from typing import Dict, Tuple, Optional, List
 from argparse import ArgumentParser
@@ -24,7 +25,9 @@ from transformers import (
 )
 
 from waymovqa.data.vqa_dataset import VQADataset
-from waymovqa.questions.single_image_single_object import SingleImageSingleObjectQuestion
+from waymovqa.questions.single_image_single_object import (
+    SingleImageSingleObjectQuestion,
+)
 from waymovqa.answers.object_2d import Object2DAnswer
 from waymovqa.answers.multi_object_2d import MultiObject2DAnswer
 from waymovqa.metrics.coco import COCOEvaluator
@@ -69,9 +72,7 @@ class OWLv2Detector(nn.Module):
         processor = AutoProcessor.from_pretrained(self.pretrained_name)
         model = Owlv2ForObjectDetection.from_pretrained(self.pretrained_name)
 
-        inputs = processor(
-            text=[texts], return_tensors="pt"
-        )
+        inputs = processor(text=[texts], return_tensors="pt")
         return model.owlv2.get_text_features(**inputs)
 
     def preprocess_image(self, image):
@@ -353,7 +354,10 @@ class OWLv2Detector(nn.Module):
             image_class_embeds=image_class_embeds,
         )
 
-def convert_to_original_coords(boxes, original_shape=(1920, 1080), resized_shape=(1008, 1008)):
+
+def convert_to_original_coords(
+    boxes, original_shape=(1920, 1080), resized_shape=(1008, 1008)
+):
     """
     Convert bounding box coordinates from resized/padded image to original image size.
 
@@ -372,7 +376,7 @@ def convert_to_original_coords(boxes, original_shape=(1920, 1080), resized_shape
 
     rev_scale_f = resized_shape[ldim] / original_shape[ldim]
 
-    pad = resized_shape - original_shape * rev_scale_f  
+    pad = resized_shape - original_shape * rev_scale_f
 
     scale_w = (original_shape[0]) / (resized_shape[0] - pad[0])
     scale_h = (original_shape[1]) / (resized_shape[1] - pad[1])
@@ -380,7 +384,6 @@ def convert_to_original_coords(boxes, original_shape=(1920, 1080), resized_shape
     # Adjust coordinates
     boxes[:, [0, 2]] = (boxes[:, [0, 2]]) * scale_w
     boxes[:, [1, 3]] = (boxes[:, [1, 3]]) * scale_h
-
 
     # Clip coordinates to stay within original image boundaries
     boxes[:, 0] = np.clip(boxes[:, 0], 0, original_shape[0])
@@ -390,6 +393,7 @@ def convert_to_original_coords(boxes, original_shape=(1920, 1080), resized_shape
 
     return boxes
 
+
 def run_on_dataset(
     gt_dataset: VQADataset,
     owlvit_model: OWLv2Detector,
@@ -397,7 +401,7 @@ def run_on_dataset(
     save_path: Path,
     batch_size=2,
     conf_thresh=0.1,
-    nms_thresh=0.5
+    nms_thresh=0.5,
 ) -> VQADataset:
     """
     Processes a single frame from the Waymo dataset using efficient batch processing.
@@ -412,7 +416,7 @@ def run_on_dataset(
     """
     batch_images, image_metas, questions = convert_dataset(gt_dataset, dataset_path)
 
-    pred_dataset = VQADataset(tag=f'owlpreds_{save_path.stem}')
+    pred_dataset = VQADataset(tag=f"owlpreds_{save_path.stem}")
 
     # Process images in smaller batches
     for batch_start in range(0, len(batch_images), batch_size):
@@ -461,39 +465,54 @@ def run_on_dataset(
             # Extract selected boxes and scores
             selected_boxes = image_outputs["pred_boxes"][nms_indices].cpu().numpy()
             selected_objectness = objectness[nms_indices].cpu().numpy()
-            print('selected_boxes', selected_boxes.shape)
-            print('selected_objectness', selected_objectness.shape)
+            print("selected_boxes", selected_boxes.shape)
+            print("selected_objectness", selected_objectness.shape)
 
             num_boxes = selected_objectness.shape[0]
 
             # get the text features for this prompt
             prompt_text_features = owlvit_model.get_text_features(prompts)
 
-            print('prompt_text_features', prompt_text_features.shape, prompt_text_features.device)
-            image_class_embeds = image_outputs['image_class_embeds'][nms_indices].cpu()
-            print('image_class_embeds', image_class_embeds.shape, image_class_embeds.device)
-            
-            prompt_out = torch.einsum("ij,kj->ik", image_class_embeds.detach().cpu(), prompt_text_features.detach().cpu())
+            print(
+                "prompt_text_features",
+                prompt_text_features.shape,
+                prompt_text_features.device,
+            )
+            image_class_embeds = image_outputs["image_class_embeds"][nms_indices].cpu()
+            print(
+                "image_class_embeds",
+                image_class_embeds.shape,
+                image_class_embeds.device,
+            )
+
+            prompt_out = torch.einsum(
+                "ij,kj->ik",
+                image_class_embeds.detach().cpu(),
+                prompt_text_features.detach().cpu(),
+            )
             prompt_out = prompt_out.sigmoid().numpy()
 
-            print('prompt_out', prompt_out.shape)
-            print('selected_objectness', selected_objectness.shape)
-            print('prompt_out', prompt_out.min(), prompt_out.max())
-            print('prompt_out', selected_objectness.min(), selected_objectness.max())
+            print("prompt_out", prompt_out.shape)
+            print("selected_objectness", selected_objectness.shape)
+            print("prompt_out", prompt_out.min(), prompt_out.max())
+            print("prompt_out", selected_objectness.min(), selected_objectness.max())
 
             # TODO: update scoring?
-            final_scores = (prompt_out + selected_objectness.reshape(prompt_out.shape)) / 2.0
+            final_scores = (
+                prompt_out + selected_objectness.reshape(prompt_out.shape)
+            ) / 2.0
             # final_scores = (prompt_out * selected_objectness.reshape(prompt_out.shape))
             # final_scores = (prompt_out * selected_objectness.reshape(prompt_out.shape))
 
-            print('final_scores', final_scores.shape)
-            print('final_scores', final_scores.min(), final_scores.max())
-
+            print("final_scores", final_scores.shape)
+            print("final_scores", final_scores.min(), final_scores.max())
 
             final_scores = final_scores.reshape(num_boxes, 1)
             final_boxes = selected_boxes.reshape(num_boxes, 4)
 
-            final_thresh = max(conf_thresh, final_scores.min()) # at least one detection (min)
+            final_thresh = max(
+                conf_thresh, final_scores.min()
+            )  # at least one detection (min)
             # indices = torch.arange(num_boxes)[final_scores >= final_thresh]
             indices = np.nonzero(final_scores >= final_thresh)[0]
             # indices = np.argmax(final_scores, axis=0).reshape(-1)
@@ -501,8 +520,8 @@ def run_on_dataset(
             final_scores = final_scores[indices]
             final_boxes = final_boxes[indices]
 
-            print('final_scores', final_scores.shape)
-            print('final_boxes', final_boxes.shape)
+            print("final_scores", final_scores.shape)
+            print("final_boxes", final_boxes.shape)
 
             # Convert to original image coordinates
             final_boxes = convert_to_original_coords(
@@ -516,17 +535,17 @@ def run_on_dataset(
             # import matplotlib.pyplot as plt
 
             # cmap = plt.get_cmap('jet')
-            
+
             # for bidx, (box, conf) in enumerate(zip(final_boxes, final_scores)):
             #     x1, y1, x2, y2 = map(int, box)
             #     color = tuple(int(x*255) for x in cmap(bidx / len(final_boxes)))
             #     cv2.rectangle(img_vis, (x1, y1), (x2, y2), color, 3)
-                
+
             #     print('conf', conf)
             #     # Add confidence text
             #     text = f'{conf[0]:.2f}'
             #     cv2.putText(
-            #         img_vis, text, (x1, y1), 
+            #         img_vis, text, (x1, y1),
             #         cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA
             #     )
 
@@ -535,15 +554,16 @@ def run_on_dataset(
             if final_boxes.shape[0] == 0:
                 answer = Object2DAnswer(box=[0.0, 0.0, 0.0, 0.0], score=0.0)
             elif final_boxes.shape[0] == 1:
-                answer = Object2DAnswer(box=final_boxes[0].tolist(), score=float(final_scores[0]))
+                answer = Object2DAnswer(
+                    box=final_boxes[0].tolist(), score=float(final_scores[0])
+                )
             else:
-                answer = MultiObject2DAnswer(boxes=final_boxes.tolist(), scores=final_scores.reshape(-1).tolist())
+                answer = MultiObject2DAnswer(
+                    boxes=final_boxes.tolist(), scores=final_scores.reshape(-1).tolist()
+                )
 
             # Add predictions
-            pred_dataset.add_sample(
-                question,
-                answer
-            )
+            pred_dataset.add_sample(question, answer)
 
         # Clear CUDA cache between batches to free up memory
         if "cuda" in str(next(owlvit_model.parameters()).device):
@@ -579,8 +599,9 @@ def convert_dataset(dataset: VQADataset, dataset_path: Path):
             }
         )
         questions.append(question)
-        
+
     return batch_images, image_metas, questions
+
 
 def main():
     import argparse
@@ -598,22 +619,37 @@ def main():
         "--vqa_path", type=str, required=True, help="Path to vqa gt dataset"
     )
     parser.add_argument(
-        "--save_path", type=str, required=True, help="Path to save vqa predictions dataset"
+        "--save_path",
+        type=str,
+        required=True,
+        help="Path to save vqa predictions dataset",
     )
     parser.add_argument(
-        "--pretrained_name", type=str, required=False, default="google/owlv2-large-patch14-ensemble", help="OWLViT Pretrained model name"
+        "--pretrained_name",
+        type=str,
+        required=False,
+        default="google/owlv2-large-patch14-ensemble",
+        help="OWLViT Pretrained model name",
     )
     parser.add_argument(
         "--nms_thresh", type=float, default=0.5, required=False, help="NMS Threshold"
     )
     parser.add_argument(
-        "--conf_thresh", type=float, default=0.1, required=False, help="Confidence Threshold"
+        "--conf_thresh",
+        type=float,
+        default=0.1,
+        required=False,
+        help="Confidence Threshold",
     )
     parser.add_argument(
         "--batch_size", type=int, default=2, required=False, help="Batch size"
     )
     parser.add_argument(
-        "--device", type=str, required=False, default="cuda:0", help="Torch device for model"
+        "--device",
+        type=str,
+        required=False,
+        default="cuda:0",
+        help="Torch device for model",
     )
 
     args = parser.parse_args()
@@ -624,9 +660,19 @@ def main():
     dataset_path = Path(args.dataset_path)
 
     if not save_path.exists():
-        owlvit_model = OWLv2Detector(args.pretrained_name, ['placeholder']).to(args.device)
+        owlvit_model = OWLv2Detector(args.pretrained_name, ["placeholder"]).to(
+            args.device
+        )
 
-        pred_dataset = run_on_dataset(gt_dataset, owlvit_model, dataset_path, save_path, args.batch_size, args.conf_thresh, args.nms_thresh)
+        pred_dataset = run_on_dataset(
+            gt_dataset,
+            owlvit_model,
+            dataset_path,
+            save_path,
+            args.batch_size,
+            args.conf_thresh,
+            args.nms_thresh,
+        )
     else:
         pred_dataset = VQADataset.load_dataset(str(save_path))
 
@@ -641,11 +687,14 @@ def main():
     prompts1 = [x[0].question for x in gt_dataset.samples]
     questions = [x[0] for x in gt_dataset.samples]
 
-    print('prompts0', len(prompts0))
-    print('prompts1', len(prompts1))
-    assert all([prompts0[i] == prompts1[i] for i in range(len(prompts0))]) and len(prompts0) == len(prompts1)
+    print("prompts0", len(prompts0))
+    print("prompts1", len(prompts1))
+    assert all([prompts0[i] == prompts1[i] for i in range(len(prompts0))]) and len(
+        prompts0
+    ) == len(prompts1)
 
     pprint.pprint(coco_eval.evaluate(predictions, ground_truths, questions))
+
 
 if __name__ == "__main__":
     main()

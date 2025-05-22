@@ -7,6 +7,7 @@ import cv2
 
 from .base import DataObject
 
+
 class CameraInfo(DataObject):
     """Camera calibration and image data."""
 
@@ -36,18 +37,15 @@ class CameraInfo(DataObject):
         self.camera_readout_done_time = None
 
     def get_camera_name(self):
-        return self.name.replace('_', ' ').lower()
+        return self.name.replace("_", " ").lower()
 
-    def project_to_camera_xyz(
-        self,
-        points: np.ndarray
-    ) -> np.ndarray:
+    def project_to_camera_xyz(self, points: np.ndarray) -> np.ndarray:
         # vehicle frame to camera sensor frame.
         extrinsic = np.array(self.extrinsic).reshape((4, 4))
         vehicle_to_sensor = extrinsic
         points_hom = np.concatenate((points, np.ones_like(points[:, [0]])), axis=1)
         points_camera_frame = points_hom @ vehicle_to_sensor
-        
+
         return points_camera_frame[:, :3]
 
     def project_to_image(
@@ -58,9 +56,9 @@ class CameraInfo(DataObject):
     ) -> np.ndarray:
         from waymo_open_dataset.wdl_limited.camera.ops import py_camera_model_ops
         from waymo_open_dataset.utils import box_utils
-        
+
         pose_matrix = np.array(frame_info.pose)
-        
+
         homogeneous_points = np.hstack([points, np.ones((points.shape[0], 1))])
         # Matrix multiplication
         world_points_homogeneous = np.matmul(homogeneous_points, pose_matrix.T)
@@ -178,10 +176,12 @@ class CameraInfo(DataObject):
         )
 
         if "metadata" in data:
-            metadata = data['metadata']
+            metadata = data["metadata"]
             camera.width = metadata.get("width", camera.width)
             camera.height = metadata.get("height", camera.height)
-            camera.rolling_shutter_direction = metadata.get("rolling_shutter_direction", camera.rolling_shutter_direction)
+            camera.rolling_shutter_direction = metadata.get(
+                "rolling_shutter_direction", camera.rolling_shutter_direction
+            )
 
         if "path" in data:
             camera.image_path = data["path"]

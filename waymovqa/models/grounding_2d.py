@@ -1,12 +1,26 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Any, List, Union, Type, TypeVar, Generic, Optional, Tuple, Protocol
+from typing import (
+    Dict,
+    Any,
+    List,
+    Union,
+    Type,
+    TypeVar,
+    Generic,
+    Optional,
+    Tuple,
+    Protocol,
+)
 from pathlib import Path
 import json
 
 from waymovqa.models.base import BaseModel
-from waymovqa.questions.single_image_single_object import SingleImageSingleObjectQuestion
+from waymovqa.questions.single_image_single_object import (
+    SingleImageSingleObjectQuestion,
+)
 from waymovqa.answers.object_2d import Object2DAnswer
 from waymovqa.metrics.coco import COCOMetric
+
 
 class Grounding2DModel(ABC):
     @property

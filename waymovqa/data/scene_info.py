@@ -10,6 +10,7 @@ from .frame_info import FrameInfo
 from .laser_info import LaserInfo
 from .object_info import ObjectInfo
 
+
 class SceneInfo(DataObject):
     """Scene information."""
 

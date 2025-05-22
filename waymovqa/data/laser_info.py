@@ -6,6 +6,7 @@ import cv2
 
 from .base import DataObject
 
+
 class LaserInfo(DataObject):
     """Laser calibration and point cloud data."""
 
