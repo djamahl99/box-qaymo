@@ -10,3 +10,16 @@ class SingleImageQuestion(BaseQuestion):
     scene_id: str
     timestamp: int
     generator_name: str
+
+    def __hash__(self) -> int:
+        return hash((self.question, self.scene_id, self.timestamp, self.camera_name))
+
+    def __eq__(self, other):
+        if not isinstance(other, SingleImageQuestion):
+            return False
+        return (
+            self.question == other.question
+            and self.scene_id == other.scene_id
+            and self.timestamp == other.timestamp
+            and self.camera_name == other.camera_name
+        )

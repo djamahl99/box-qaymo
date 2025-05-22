@@ -28,6 +28,9 @@ class BaseQuestion(BaseModel):
 
     generator_name: str
     question_type: QuestionType
+    data: Optional[Dict[str, Any]] = (
+        None  # Custom data field for generator-specific info
+    )
 
     @classmethod
     def from_dict(cls, data: Dict):
