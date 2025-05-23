@@ -565,7 +565,7 @@ class ObjectInfo(DataObject):
         vector = ahead_point_cam - obj_centre_cam
 
         # Normalize the vector for direction determination
-        normalized_vector = vector.reshape(3) / np.linalg.norm(vector)
+        normalized_vector = vector.reshape(3) / (np.linalg.norm(vector) + 1e-6)
 
         # only left/right or towards/away (remove z axis)
         normalized_vector = normalized_vector[:2]

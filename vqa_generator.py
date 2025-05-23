@@ -253,9 +253,7 @@ def main():
         required=True,
         help="Path to processed waymo dataset",
     )
-    # parser.add_argument(
-    #     "--save_path", type=str, required=True, help="Path to save dataset"
-    # )
+    parser.add_argument("--save_prefix", type=str, required=False, default="")
     parser.add_argument(
         "--model", type=str, default=None, required=False, help="Model name"
     )
@@ -295,13 +293,14 @@ def main():
         total_samples=args.total_samples, visualise=args.visualise
     )
 
-    # output_path = Path(args.save_path)
     output_dir = Path(args.dataset_path) / "generated_vqa_samples"
     output_dir.mkdir(exist_ok=True)
 
+    save_prefix = args.save_prefix
+
     # Save dataset
     for split_name, dataset in generator.datasets.items():
-        split_save_path = output_dir / f"{split_name}.json"
+        split_save_path = output_dir / f"{save_prefix}_{split_name}.json"
 
         print(f"Saving {split_name} to {split_save_path}")
 

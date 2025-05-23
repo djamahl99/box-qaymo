@@ -9,7 +9,9 @@ from collections import defaultdict
 from abc import ABC, abstractmethod
 
 from waymovqa.answers.multiple_choice import MultipleChoiceAnswer
-from waymovqa.questions.single_image import SingleImageQuestion
+from waymovqa.questions.single_image_multi_choice import (
+    SingleImageMultipleChoiceQuestion,
+)
 from waymovqa.questions.multi_image import MultipleImageQuestion
 from waymovqa.data.scene_info import SceneInfo
 from waymovqa.data.object_info import (
@@ -47,6 +49,9 @@ class ObjectBinaryPromptGenerator(BasePromptGenerator):
         direction_counts = defaultdict(int)
 
         for obj in frame.objects:
+            if obj.type in ["TYPE_UNKNOWN", "TYPE_SIGN"]:
+                continue
+
             if not obj.is_visible_on_camera(frame, camera):
                 continue
 
@@ -54,9 +59,9 @@ class ObjectBinaryPromptGenerator(BasePromptGenerator):
             if not movement_dir_txt:
                 continue
 
-            obj_type = obj.get_simple_type()
-            if obj_type is None or obj_type == "Sign":
-                continue  # signs don't have movement
+            obj_type = obj.type
+            if obj_type is None:
+                continue
 
             movement_status = obj.get_speed_category()
             key = (obj_type, movement_dir_txt, movement_status)
@@ -73,13 +78,15 @@ class ObjectBinaryPromptGenerator(BasePromptGenerator):
         ), count in direction_counts.items():
             answer = "yes" if count > 0 else "no"
             questions.append(
-                f"Are there any {movement_status} {obj_type}s moving {movement_dir_txt} in the camera image?"
+                f"Are there any {movement_status} {WAYMO_TYPE_MAPPING[obj_type].lower()}s moving {movement_dir_txt} in the camera image?"
             )
             answers.append(answer)
 
         # Generate all possible combinations for negative sampling
         all_object_types = [
-            x for x in WAYMO_TYPE_MAPPING if x is not None and x != "Sign"
+            x
+            for x in WAYMO_TYPE_MAPPING
+            if x is not None and (x not in ["TYPE_UNKNOWN", "TYPE_SIGN"])
         ]
         all_headings = [h.value for h in HeadingType]
 
@@ -120,7 +127,7 @@ class ObjectBinaryPromptGenerator(BasePromptGenerator):
         # Add the negative samples using the generated combinations
         for obj_type, movement_dir_txt, movement_status in negative_combinations:
             questions.append(
-                f"Are there any {movement_status} {obj_type}s moving {movement_dir_txt} in the camera image?"
+                f"Are there any {movement_status} {WAYMO_TYPE_MAPPING[obj_type].lower()}s moving {movement_dir_txt} in the camera image?"
             )
             answers.append("no")
 
@@ -130,19 +137,18 @@ class ObjectBinaryPromptGenerator(BasePromptGenerator):
         """Generates binary questions about object type, movement status (moving or static) and heading (facing) combinations."""
         heading_counts = defaultdict(int)
 
-        ignore_sign = False
-
         for obj in frame.objects:
+            if obj.type in ["TYPE_UNKNOWN", "TYPE_SIGN"]:
+                continue
+
             if not obj.is_visible_on_camera(frame, camera):
                 continue
 
-            heading_txt = obj.get_camera_heading_direction(
-                frame, camera, ignore_sign=ignore_sign
-            )
+            heading_txt = obj.get_camera_heading_direction(frame, camera)
             if heading_txt is None:
                 continue
 
-            obj_type = obj.get_simple_type()
+            obj_type = obj.type
             if obj_type is None:
                 continue
 
@@ -158,7 +164,7 @@ class ObjectBinaryPromptGenerator(BasePromptGenerator):
         for (obj_type, heading, movement_status), count in heading_counts.items():
             answer = "yes" if count > 0 else "no"
             questions.append(
-                f"Are there any {movement_status} {obj_type}s facing {heading} in the camera image?"
+                f"Are there any {movement_status} {WAYMO_TYPE_MAPPING[obj_type].lower()}s facing {heading} in the camera image?"
             )
             answers.append(answer)
 
@@ -166,7 +172,7 @@ class ObjectBinaryPromptGenerator(BasePromptGenerator):
         all_object_types = [
             x
             for x in WAYMO_TYPE_MAPPING
-            if x is not None and (x != "Sign" or not ignore_sign)
+            if x is not None and (x not in ["TYPE_UNKNOWN", "TYPE_SIGN"])
         ]
         all_headings = [h.value for h in HeadingType]
 
@@ -207,7 +213,7 @@ class ObjectBinaryPromptGenerator(BasePromptGenerator):
         # Add the negative samples using the generated combinations
         for obj_type, heading, movement_status in negative_combinations:
             questions.append(
-                f"Are there any {movement_status} {obj_type}s facing {heading} in the camera image?"
+                f"Are there any {movement_status} {WAYMO_TYPE_MAPPING[obj_type].lower()}s facing {heading} in the camera image?"
             )
             answers.append("no")
 
@@ -225,9 +231,7 @@ class ObjectBinaryPromptGenerator(BasePromptGenerator):
 
     def generate(
         self, frames
-    ) -> List[
-        Tuple[Union[MultipleImageQuestion, SingleImageQuestion], MultipleChoiceAnswer]
-    ]:
+    ) -> List[Tuple[SingleImageMultipleChoiceQuestion, MultipleChoiceAnswer]]:
         """Generate binary (yes/no) questions."""
         samples = []
 
@@ -236,32 +240,29 @@ class ObjectBinaryPromptGenerator(BasePromptGenerator):
         for camera in frame.cameras:
             # Generate questions using generators
             for question_func in self.prompt_functions:
-                try:
-                    questions, answers = question_func(camera, frame)
+                questions, answers = question_func(camera, frame)
 
-                    for question_text, answer_text in zip(questions, answers):
-                        question = SingleImageQuestion(
-                            image_path=camera.image_path,
-                            question=question_text,
-                            scene_id=frame.scene_id,
-                            timestamp=frame.timestamp,
-                            camera_name=camera.name,
-                            generator_name=f"{self.__class__.__module__}.{self.__class__.__name__}",
-                        )
+                for question_text, answer_text in zip(questions, answers):
+                    question = SingleImageMultipleChoiceQuestion(
+                        image_path=camera.image_path,
+                        question=question_text,
+                        scene_id=frame.scene_id,
+                        timestamp=frame.timestamp,
+                        camera_name=camera.name,
+                        generator_name=f"{self.__class__.__module__}.{self.__class__.__name__}",
+                        choices=["yes", "no"],
+                    )
 
-                        answer = MultipleChoiceAnswer(
-                            choices=["yes", "no"], answer=answer_text
-                        )
-                        samples.append((question, answer))
-                except Exception as e:
-                    print(f"Error in question generator {question_func.__name__}: {e}")
-                    continue
+                    answer = MultipleChoiceAnswer(
+                        choices=["yes", "no"], answer=answer_text
+                    )
+                    samples.append((question, answer))
 
         return samples
 
     def visualise_sample(
         self,
-        question_obj: SingleImageQuestion,
+        question_obj: SingleImageMultipleChoiceQuestion,
         answer_obj: MultipleChoiceAnswer,
         save_path,
         frames,

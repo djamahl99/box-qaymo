@@ -231,7 +231,9 @@ def run_on_dataset(
                 batch_questions.append(question)
                 batch_gt_answers.append(gt_answer)
         else:
-            raise TypeError(f"Question type not valid for this model")
+            raise TypeError(
+                f"Question type {question.__class__.__name__} not valid for this model"
+            )
 
         # Process batch if it reaches the specified size
         if len(batch_text_strs) >= batch_size:
