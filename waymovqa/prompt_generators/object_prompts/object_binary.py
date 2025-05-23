@@ -12,7 +12,12 @@ from waymovqa.answers.multiple_choice import MultipleChoiceAnswer
 from waymovqa.questions.single_image import SingleImageQuestion
 from waymovqa.questions.multi_image import MultipleImageQuestion
 from waymovqa.data.scene_info import SceneInfo
-from waymovqa.data.object_info import WAYMO_TYPE_MAPPING, HeadingType, ObjectInfo
+from waymovqa.data.object_info import (
+    OBJECT_SPEED_CATS,
+    WAYMO_TYPE_MAPPING,
+    HeadingType,
+    ObjectInfo,
+)
 from waymovqa.data.frame_info import FrameInfo
 from waymovqa.data.camera_info import CameraInfo
 from waymovqa.data.laser_info import LaserInfo
@@ -30,80 +35,78 @@ class ObjectBinaryPromptGenerator(BasePromptGenerator):
 
     def __init__(self) -> None:
         super().__init__()
-        self.negative_sample_ratio = 0.3  # 30% negative samples
+        self.negative_sample_ratio = 0.5  # 30% negative samples
 
-        self.SINGLE_CAMERA_ATTRIBUTE_CONFIGS = [
-            (
-                HeadingType,
-                self._count_heading_camera,
-                HEADING_QUESTIONS_BINARY_SINGLE_IMAGE,
-            ),
-            (
-                [x for x in WAYMO_TYPE_MAPPING if x is not None],
-                self._count_waymo_type,
-                WAYMO_TYPE_BINARY_QUESTIONS,  # remove this part
-            ),
+        self.prompt_functions = [
+            self._object_facing_type,
+            self._object_movement_direction_type,
         ]
 
-        self.other_generators = [
-            self._count_waymo_type_heading,
-        ]
-
-    def _count_waymo_type_heading(self, camera, frame):
-        """Generates binary questions about object type and heading combinations."""
-        heading_counts = defaultdict(int)
+    def _object_movement_direction_type(self, camera, frame):
+        """Generates binary questions about object type, movement status (moving or static) and movement direction."""
+        direction_counts = defaultdict(int)
 
         for obj in frame.objects:
-            if not obj.get_camera_heading_text(camera, frame):
+            if not obj.is_visible_on_camera(frame, camera):
+                continue
+
+            movement_dir_txt = obj.get_camera_movement_direction(camera, frame)
+            if not movement_dir_txt:
                 continue
 
             obj_type = obj.get_simple_type()
-            if obj_type == "Sign":
-                continue  # signs don't really have headings
+            if obj_type is None or obj_type == "Sign":
+                continue  # signs don't have movement
 
-            heading = obj.get_camera_heading_text(camera, frame)
-            key = (obj_type, heading)
-            heading_counts[key] += 1
+            movement_status = obj.get_speed_category()
+            key = (obj_type, movement_dir_txt, movement_status)
+            direction_counts[key] += 1
 
         questions = []
         answers = []
 
-        # Get all possible combinations for negative sampling
+        # Add positive examples (where objects exist)
+        for (
+            obj_type,
+            movement_dir_txt,
+            movement_status,
+        ), count in direction_counts.items():
+            answer = "yes" if count > 0 else "no"
+            questions.append(
+                f"Are there any {movement_status} {obj_type}s moving {movement_dir_txt} in the camera image?"
+            )
+            answers.append(answer)
+
+        # Generate all possible combinations for negative sampling
         all_object_types = [
             x for x in WAYMO_TYPE_MAPPING if x is not None and x != "Sign"
         ]
         all_headings = [h.value for h in HeadingType]
 
-        # Add positive examples (where objects exist)
-        for (obj_type, heading), count in heading_counts.items():
-            answer = "yes" if count > 0 else "no"
-            questions.append(
-                f"Are there any {obj_type}s heading {heading} in the camera image?"
-            )
-            answers.append(answer)
+        all_possible_combinations = []
+        for obj_type in all_object_types:
+            for heading in all_headings:
+                for speed_cat, _, _ in OBJECT_SPEED_CATS[obj_type]:
+                    all_possible_combinations.append((obj_type, heading, speed_cat))
 
-        # Add negative examples (where objects don't exist)
+        # Calculate how many negative samples we need
         negative_samples_needed = int(
             len(questions)
             * self.negative_sample_ratio
             / (1 - self.negative_sample_ratio)
         )
 
-        potential_negatives = []
-        for obj_type in all_object_types:
-            for heading in all_headings:
-                if (obj_type, heading) not in heading_counts:
-                    potential_negatives.append((obj_type, heading))
-
-        # Sample negatives without replacement
-        num_negatives_available = len(potential_negatives)
-        num_negatives_to_sample = min(negative_samples_needed, num_negatives_available)
+        # Use the existing function to generate negative samples
+        positive_combinations = list(direction_counts.keys())
+        negative_combinations = self._generate_negative_samples(
+            positive_combinations, all_possible_combinations, negative_samples_needed
+        )
 
         # If we can't get enough negatives, reduce positives to maintain ratio
-        if num_negatives_to_sample < negative_samples_needed:
+        if len(negative_combinations) < negative_samples_needed:
             # Calculate how many positives we should keep
             max_positives = int(
-                num_negatives_to_sample
+                len(negative_combinations)
                 * (1 - self.negative_sample_ratio)
                 / self.negative_sample_ratio
             )
@@ -114,49 +117,101 @@ class ObjectBinaryPromptGenerator(BasePromptGenerator):
                 questions, answers = zip(*selected_positives)
                 questions, answers = list(questions), list(answers)
 
-        # Add the negative samples
-        if potential_negatives:
-            selected_negatives = random.sample(
-                potential_negatives, num_negatives_to_sample
+        # Add the negative samples using the generated combinations
+        for obj_type, movement_dir_txt, movement_status in negative_combinations:
+            questions.append(
+                f"Are there any {movement_status} {obj_type}s moving {movement_dir_txt} in the camera image?"
             )
-
-            for obj_type, heading in selected_negatives:
-                questions.append(
-                    f"Are there any {obj_type}s heading {heading} in the camera image?"
-                )
-                answers.append("no")
+            answers.append("no")
 
         return questions, answers
 
-    def _count_heading_camera(self, camera, frame):
-        """Count the number of objects per heading."""
+    def _object_facing_type(self, camera, frame):
+        """Generates binary questions about object type, movement status (moving or static) and heading (facing) combinations."""
         heading_counts = defaultdict(int)
+
+        ignore_sign = False
 
         for obj in frame.objects:
             if not obj.is_visible_on_camera(frame, camera):
                 continue
 
-            if obj.get_simple_type() == "Sign":
-                continue  # signs don't really have headings
-
-            heading = obj.get_camera_heading_text(camera, frame)
-            heading_counts[heading] += 1
-
-        return heading_counts
-
-    def _count_waymo_type(self, camera, frame):
-        """Count the number of waymo object types."""
-        type_counts = defaultdict(int)
-
-        for obj in frame.objects:
-            if not obj.get_camera_heading_text(camera, frame):
+            heading_txt = obj.get_camera_heading_direction(
+                frame, camera, ignore_sign=ignore_sign
+            )
+            if heading_txt is None:
                 continue
 
-            object_type = obj.get_simple_type()
-            if object_type is not None:
-                type_counts[object_type] += 1
+            obj_type = obj.get_simple_type()
+            if obj_type is None:
+                continue
 
-        return type_counts
+            heading = obj.get_camera_heading_direction(frame, camera)
+            movement_status = obj.get_speed_category()
+            key = (obj_type, heading_txt, movement_status)
+            heading_counts[key] += 1
+
+        questions = []
+        answers = []
+
+        # Add positive examples (where objects exist)
+        for (obj_type, heading, movement_status), count in heading_counts.items():
+            answer = "yes" if count > 0 else "no"
+            questions.append(
+                f"Are there any {movement_status} {obj_type}s facing {heading} in the camera image?"
+            )
+            answers.append(answer)
+
+        # Generate all possible combinations for negative sampling
+        all_object_types = [
+            x
+            for x in WAYMO_TYPE_MAPPING
+            if x is not None and (x != "Sign" or not ignore_sign)
+        ]
+        all_headings = [h.value for h in HeadingType]
+
+        all_possible_combinations = []
+        for obj_type in all_object_types:
+            for heading in all_headings:
+                for speed_cat, _, _ in OBJECT_SPEED_CATS[obj_type]:
+                    all_possible_combinations.append((obj_type, heading, speed_cat))
+
+        # Calculate how many negative samples we need
+        negative_samples_needed = int(
+            len(questions)
+            * self.negative_sample_ratio
+            / (1 - self.negative_sample_ratio)
+        )
+
+        # Use the existing function to generate negative samples
+        positive_combinations = list(heading_counts.keys())
+        negative_combinations = self._generate_negative_samples(
+            positive_combinations, all_possible_combinations, negative_samples_needed
+        )
+
+        # If we can't get enough negatives, reduce positives to maintain ratio
+        if len(negative_combinations) < negative_samples_needed:
+            # Calculate how many positives we should keep
+            max_positives = int(
+                len(negative_combinations)
+                * (1 - self.negative_sample_ratio)
+                / self.negative_sample_ratio
+            )
+            if len(questions) > max_positives:
+                # Randomly sample from positive examples
+                positive_samples = list(zip(questions, answers))
+                selected_positives = random.sample(positive_samples, max_positives)
+                questions, answers = zip(*selected_positives)
+                questions, answers = list(questions), list(answers)
+
+        # Add the negative samples using the generated combinations
+        for obj_type, heading, movement_status in negative_combinations:
+            questions.append(
+                f"Are there any {movement_status} {obj_type}s facing {heading} in the camera image?"
+            )
+            answers.append("no")
+
+        return questions, answers
 
     def _generate_negative_samples(self, positive_choices, all_choices, count_needed):
         """Generate negative samples from choices not in positive set."""
@@ -179,67 +234,8 @@ class ObjectBinaryPromptGenerator(BasePromptGenerator):
         frame = random.choice(frames)
 
         for camera in frame.cameras:
-            # Generate questions using configured templates
-            for (
-                choices,
-                question_func,
-                question_templates,
-            ) in self.SINGLE_CAMERA_ATTRIBUTE_CONFIGS:
-                if isinstance(choices, type) and issubclass(choices, enum.Enum):
-                    choices = [enum_val.value for enum_val in choices]
-
-                if question_func is None:
-                    continue
-
-                choice_value_dict = question_func(camera, frame)
-
-                # Collect positive examples
-                positive_examples = []
-                for choice, value in choice_value_dict.items():
-                    if choice not in choices:
-                        continue
-
-                    answer_text = "yes" if value > 0 else "no"
-
-                    question_template = random.choice(question_templates)
-                    question_text = question_template.format(choice)
-
-                    positive_examples.append((question_text, answer_text))
-
-                # Generate negative examples for better balance
-                positive_choices = set(choice_value_dict.keys())
-                negative_count = int(
-                    len(positive_examples)
-                    * self.negative_sample_ratio
-                    / (1 - self.negative_sample_ratio)
-                )
-                negative_choices = self._generate_negative_samples(
-                    positive_choices, choices, negative_count
-                )
-
-                for choice in negative_choices:
-                    question_template = random.choice(question_templates)
-                    question_text = question_template.format(choice)
-                    positive_examples.append((question_text, "no"))
-
-                # Create question objects
-                for question_text, answer_text in positive_examples:
-                    question = SingleImageQuestion(
-                        image_path=camera.image_path,
-                        question=question_text,
-                        scene_id=frame.scene_id,
-                        timestamp=frame.timestamp,
-                        camera_name=camera.name,
-                        generator_name=f"{self.__class__.__module__}.{self.__class__.__name__}",
-                    )
-
-                    answer = MultipleChoiceAnswer(
-                        choices=["yes", "no"], answer=answer_text
-                    )
-                    samples.append((question, answer))
-
-            # Generate questions using other generators
-            for question_func in self.other_generators:
+            # Generate questions using generators
+            for question_func in self.prompt_functions:
                 try:
                     questions, answers = question_func(camera, frame)
 

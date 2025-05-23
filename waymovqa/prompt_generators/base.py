@@ -47,6 +47,12 @@ class BasePromptGenerator(Generic[TQ], ABC):
         """Return the answer type class used by this generator."""
         pass
 
+    def _get_formatted_options(self, choices):
+        # Format options for all question texts
+        formatted_options = ", ".join(choices[:-1]) + " or " + choices[-1]
+
+        return formatted_options
+
     def _find_objects_visible_in_same_frame(
         self, frames: List[FrameInfo]
     ) -> List[List[str]]:
@@ -81,6 +87,9 @@ class BasePromptGenerator(Generic[TQ], ABC):
                     not hasattr(obj, "most_visible_camera_name")
                     or not obj.most_visible_camera_name
                 ):
+                    continue
+
+                if obj.type in ["TYPE_UNKNOWN", "TYPE_SIGN"]:
                     continue
 
                 # Get the most visible camera for this object

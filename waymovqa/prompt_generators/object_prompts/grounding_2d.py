@@ -76,23 +76,9 @@ class Grounding2DPromptGenerator(BasePromptGenerator):
                 for obj in objs:
                     if not obj.is_visible_on_camera(frame, camera):
                         continue
-                    uvdok = obj.project_to_image(
-                        frame_info=frame, camera_info=camera, return_depth=True
-                    )
-                    u, v, depth, ok = uvdok.transpose()
-                    ok = ok.astype(bool)
+                    x1, y1, x2, y2 = obj.get_object_bbox_2d(frame, camera)
 
-                    x_min, x_max = int(min(u)), int(max(u))
-                    y_min, y_max = int(min(v)), int(max(v))
-
-                    x_min, x_max = [
-                        max(min(x, camera.width), 0) for x in [x_min, x_max]
-                    ]
-                    y_min, y_max = [
-                        max(min(y, camera.height), 0) for y in [y_min, y_max]
-                    ]
-
-                    boxes.append([x_min, y_min, x_max, y_max])
+                    boxes.append([x1, y1, x2, y2])
                     object_ids.append(obj.id)
 
                 if boxes and len(boxes) > 0:

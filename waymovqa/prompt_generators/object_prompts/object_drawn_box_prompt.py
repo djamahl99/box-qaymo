@@ -16,7 +16,12 @@ from waymovqa.questions.single_image_multi_choice import (
     SingleBase64ImageMultipleChoiceQuestion,
 )
 from waymovqa.data.scene_info import SceneInfo
-from waymovqa.data.object_info import HeadingType, ObjectInfo
+from waymovqa.data.object_info import (
+    OBJECT_SPEED_CATS,
+    HeadingType,
+    MovementType,
+    ObjectInfo,
+)
 from waymovqa.data.frame_info import FrameInfo
 from waymovqa.data.camera_info import CameraInfo
 from waymovqa.data.laser_info import LaserInfo
@@ -29,12 +34,51 @@ from waymovqa.data.visualise import (
 )
 from waymovqa.primitives import colors as labelled_colors
 from waymovqa.primitives import labels as finegrained_labels
+from waymovqa.primitives import CHOICES_OPTIONS
 
-from waymovqa.prompt_generators.templates import (
-    COLOR_QUESTIONS_CHOICES,
-    LABEL_QUESTIONS_CHOICES,
-    HEADING_QUESTIONS_CHOICES,
-)
+OBJECT_COLOR = (0, 0, 255)
+OBJECT_COLOR_TEXT = "red"
+OBJECT_RECT_THICKNESS = 6
+
+DRAWN_BBOX_COLOR_QUESTIONS_CHOICES = [
+    "What color is the object in the {} box? Choose from: {{}}".format(
+        OBJECT_COLOR_TEXT
+    ),
+    "What color is the object highlighted in {}? Select from: {{}}".format(
+        OBJECT_COLOR_TEXT
+    ),
+    "Which color best describes the object in the {} box? Options: {{}}".format(
+        OBJECT_COLOR_TEXT
+    ),
+]
+
+LABEL_QUESTIONS_CHOICES = [
+    "What type of object is in the {} box? Choose from: {{}}".format(OBJECT_COLOR_TEXT),
+    "What is the object in the {} rectangle? Select from: {{}}".format(
+        OBJECT_COLOR_TEXT
+    ),
+    "Which category best describes the object in the {} box? Options: {{}}".format(
+        OBJECT_COLOR_TEXT
+    ),
+]
+
+HEADING_QUESTIONS_CHOICES = [
+    "Which direction is the object in the {} box facing? Choose from: {{}}".format(
+        OBJECT_COLOR_TEXT
+    ),
+    "What direction is the object highlighted in {} facing? Select from: {{}}".format(
+        OBJECT_COLOR_TEXT
+    ),
+]
+
+MOVEMENT_DIRECTION_QUESTIONS_CHOICES = [
+    "Which direction is the object in the {} box moving? Choose from: {{}}".format(
+        OBJECT_COLOR_TEXT
+    ),
+    "What direction is the object highlighted in {} moving? Select from: {{}}".format(
+        OBJECT_COLOR_TEXT
+    ),
+]
 
 
 @register_prompt_generator
@@ -44,17 +88,73 @@ class ObjectDrawnBoxPromptGenerator(BasePromptGenerator):
     def __init__(self) -> None:
         super().__init__()
 
-        self.ATTRIBUTE_CONFIGS = [
-            (labelled_colors, "cvat_color", COLOR_QUESTIONS_CHOICES, None),
-            (finegrained_labels, "cvat_label", LABEL_QUESTIONS_CHOICES, None),
-            (
-                HeadingType,
-                None,
-                HEADING_QUESTIONS_CHOICES,
-                lambda obj, camera, frame: obj.get_camera_heading_text(camera, frame),
-            ),
-            # TODO: movement
+        self.prompt_functions = [
+            self._color_prompt,
+            self._label_prompt,
+            self._heading_prompt,
+            self._speed_prompt,
         ]
+
+    def _color_prompt(self, obj: ObjectInfo, camera: CameraInfo, frame: FrameInfo):
+        """Generate prompt based on the object color."""
+        if obj.cvat_color is None:
+            return None, None, None
+
+        return labelled_colors, DRAWN_BBOX_COLOR_QUESTIONS_CHOICES, obj.cvat_color
+
+    def _label_prompt(self, obj: ObjectInfo, camera: CameraInfo, frame: FrameInfo):
+        """Generate prompt based on the cvat label."""
+        if obj.cvat_label is None:
+            return None, None, None
+
+        return finegrained_labels, LABEL_QUESTIONS_CHOICES, obj.cvat_label
+
+    def _heading_prompt(self, obj: ObjectInfo, camera: CameraInfo, frame: FrameInfo):
+        """Generate prompt based on the object heading."""
+        choices = [enum_val.value for enum_val in HeadingType]
+
+        return (
+            choices,
+            HEADING_QUESTIONS_CHOICES,
+            obj.get_camera_heading_direction(frame, camera),
+        )
+
+    def _movement_direction_prompt(
+        self, obj: ObjectInfo, camera: CameraInfo, frame: FrameInfo
+    ):
+        """Generate prompt based on the object heading."""
+        choices = [enum_val.value for enum_val in MovementType]
+
+        return (
+            choices,
+            MOVEMENT_DIRECTION_QUESTIONS_CHOICES,
+            obj.get_camera_movement_direction(camera, frame),
+        )
+
+    def _speed_prompt(self, obj: ObjectInfo, camera: CameraInfo, frame: FrameInfo):
+        speed = obj.get_speed()
+
+        if speed is None:
+            return None, None, None
+
+        choices = []
+        answer_txt = None
+        for speed_cat, speed_lwbnd, speed_upbnd in OBJECT_SPEED_CATS[obj.type]:  # type: ignore
+            choices.append(speed_cat)
+
+            if (speed >= speed_lwbnd) and (speed <= speed_upbnd):
+                answer_txt = speed_cat
+
+        templates = [
+            f"How fast would you describe the speed of the {obj.get_simple_type()}? "
+            + "Choose from {}."
+        ]
+
+        return (
+            choices,
+            templates,
+            answer_txt,
+        )
 
     def generate(
         self, frames
@@ -66,46 +166,59 @@ class ObjectDrawnBoxPromptGenerator(BasePromptGenerator):
         object_best_views = self._find_best_object_views(frames)
 
         for frame, camera, obj in object_best_views.values():
-            img_vis = cv2.imread(camera.image_path)
+            if obj.type in ["TYPE_UNKNOWN", "TYPE_SIGN"]:
+                continue
 
-            uvdok = obj.project_to_image(
-                frame_info=frame, camera_info=camera, return_depth=True
+            if not obj.is_visible_on_camera(frame, camera):
+                continue
+
+            img_vis = cv2.imread(camera.image_path)  # type: ignore
+
+            x1, y1, x2, y2 = obj.get_object_bbox_2d(frame, camera)
+
+            cv2.rectangle(
+                img_vis, (x1, y1), (x2, y2), OBJECT_COLOR, OBJECT_RECT_THICKNESS  # type: ignore
             )
-            u, v, depth, ok = uvdok.transpose()
-            ok = ok.astype(bool)
-
-            x_min, x_max = int(min(u)), int(max(u))
-            y_min, y_max = int(min(v)), int(max(v))
-
-            x_min, x_max = [max(min(x, camera.width), 0) for x in [x_min, x_max]]
-            y_min, y_max = [max(min(y, camera.height), 0) for y in [y_min, y_max]]
-
-            color = (0, 255, 0)
-            img_vis = cv2.imread(camera.image_path)
-            cv2.rectangle(img_vis, (x_min, y_min), (x_max, y_max), color, 4)
 
             _, buffer = cv2.imencode(".jpg", img_vis)  # or '.png'
             img_base64 = base64.b64encode(buffer).decode("utf-8")
 
-            for (
-                choices,
-                attr_name,
-                question_templates,
-                question_func,
-            ) in self.ATTRIBUTE_CONFIGS:
-                if isinstance(choices, type) and issubclass(choices, enum.Enum):
-                    choices = [enum_val.value for enum_val in choices]
+            for prompt_func in self.prompt_functions:
+                prompt_out = prompt_func(obj, camera, frame)
 
-                if question_func is not None:
-                    answer_txt = question_func(obj=obj, camera=camera, frame=frame)
-                else:
-                    answer_txt = getattr(obj, attr_name)
+                # e.g. if an object was not moving
+                if any([x is None for x in prompt_out]):
+                    continue
+
+                choices, question_templates, answer_txt = prompt_out
+
+                if len(choices) > CHOICES_OPTIONS:
+                    # Remove correct answer from choices
+                    distractors = [x for x in choices if x != answer_txt]
+
+                    # Sample (CHOICES_OPTIONS - 1) distractors
+                    sampled = np.random.choice(
+                        distractors, CHOICES_OPTIONS - 1, replace=False
+                    ).tolist()
+
+                    # Add the correct answer back in
+                    choices = sampled + [answer_txt]
+
+                    # (Optional) Shuffle the final choices
+                    np.random.shuffle(choices)
+
+                if len(choices) < 2:
+                    print(f"Received only {len(choices)} choices from {prompt_func}")
+                    continue
 
                 if answer_txt is None or answer_txt not in choices:
+                    print(
+                        f"answer_txt={answer_txt} is none or not in choices={choices}"
+                    )
                     continue
 
                 # Format options for all question texts
-                formatted_options = ", ".join(choices[:-1]) + " or " + choices[-1]
+                formatted_options = self._get_formatted_options(choices)
 
                 # Select one question template randomly
                 question_template = random.choice(question_templates)
@@ -115,12 +228,14 @@ class ObjectDrawnBoxPromptGenerator(BasePromptGenerator):
 
                 question = SingleBase64ImageMultipleChoiceQuestion(
                     image_base64=img_base64,
+                    image_path=camera.image_path,
                     question=question_text,
                     choices=choices,
                     scene_id=obj.scene_id,
                     timestamp=frame.timestamp,
                     camera_name=camera.name,
                     generator_name=f"{self.__class__.__module__}.{self.__class__.__name__}",
+                    data=dict(bbox=[x1, y1, x2, y2]),
                 )
 
                 answer = MultipleChoiceAnswer(

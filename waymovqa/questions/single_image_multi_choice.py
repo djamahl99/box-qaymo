@@ -31,6 +31,7 @@ class SingleImageMultipleChoiceQuestion(BaseQuestion):
 class SingleBase64ImageMultipleChoiceQuestion(BaseQuestion):
     question_type: QuestionType = QuestionType.SINGLE_IMAGE
     image_base64: str
+    image_path: str
     question: str
     choices: List[str]
     scene_id: str

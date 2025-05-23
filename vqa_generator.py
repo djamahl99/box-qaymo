@@ -297,6 +297,8 @@ def main():
 
     # output_path = Path(args.save_path)
     output_dir = Path(args.dataset_path) / "generated_vqa_samples"
+    output_dir.mkdir(exist_ok=True)
+
     # Save dataset
     for split_name, dataset in generator.datasets.items():
         split_save_path = output_dir / f"{split_name}.json"

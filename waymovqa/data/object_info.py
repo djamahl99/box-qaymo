@@ -2,7 +2,6 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional, Union, Tuple
 import json
 import numpy as np
-import cv2
 from enum import Enum
 
 from waymovqa.data.base import DataObject
@@ -22,14 +21,51 @@ WAYMO_TYPE_MAPPING = {
     "TYPE_CYCLIST": "Cyclist",
 }
 
+OBJECT_SPEED_THRESH = {
+    "TYPE_UNKNOWN": float("inf"),
+    "TYPE_VEHICLE": 5.0,  # metres/second
+    "TYPE_PEDESTRIAN": 1.1,  # walking speed
+    "TYPE_SIGN": float("inf"),  # shouldn't move
+    "TYPE_CYCLIST": 1.5,  # a bit faster than say walking
+}
+
+# all in m/s
+OBJECT_SPEED_CATS = {
+    "TYPE_UNKNOWN": [],
+    "TYPE_VEHICLE": [
+        ("stationary", 0.0, 2.8),  # up to 10km/h
+        ("slow speed", 2.8, 11.11),  # up to 40 km/h
+        ("medium speed", 11.11, 19.44),  # up to 70 km/h
+        ("highway speed", 19.44, float("inf")),
+    ],
+    "TYPE_PEDESTRIAN": [
+        ("stationary", 0.0, 1.1),
+        ("walking", 1.1, 2.3),
+        ("jogging", 2.3, 3.0),
+        ("running", 3.0, float("inf")),
+    ],  # jogging about 7mins/km and running faster than 3.0 m/s
+    "TYPE_SIGN": [("stationary", 0.0, float("inf"))],
+    "TYPE_CYCLIST": [
+        ("stationary", 0.0, 1.5),  # up to a bit faster than walking speed
+        ("slow moving", 1.5, 8.33),  # up to 30 km/h
+        ("fast ", 8.33, float("inf")),  # any faster than 30km/h
+    ],
+}
+
 
 class HeadingType(str, Enum):
     TOWARDS = "towards"
     AWAY = "away"
     LEFT = "left"
     RIGHT = "right"
-    UP = "up"
-    DOWN = "down"
+
+
+class MovementType(str, Enum):
+    TOWARDS = "towards"
+    AWAY = "away"
+    LEFT = "left"
+    RIGHT = "right"
+    NOT_MOVING = "not moving"
 
 
 class ObjectInfo(DataObject):
@@ -134,6 +170,17 @@ class ObjectInfo(DataObject):
         return np.array(
             [self.box["center_x"], self.box["center_y"], self.box["center_z"]]
         )
+
+    def get_world_centre(self, frame: "FrameInfo") -> np.ndarray:
+        """Get the object centre position in world coordinates."""
+        world_pose = np.array(frame.pose)
+
+        centre = self.get_centre()
+        centre_h = np.append(centre, 1.0).reshape(1, 4)
+        world_centre = np.matmul(centre_h, world_pose.T).reshape(-1)
+        world_centre = world_centre[:3]
+
+        return world_centre
 
     def project_to_image(
         self,
@@ -245,6 +292,32 @@ class ObjectInfo(DataObject):
                 )
 
                 raise e
+
+    def get_object_bbox_2d(
+        self, frame: "FrameInfo", camera: "CameraInfo"
+    ) -> List[float]:
+        """Get the object's 2d bbox."""
+        uvdok = self.project_to_image(
+            frame_info=frame, camera_info=camera, return_depth=True
+        )
+        u, v, depth, ok = uvdok.transpose()
+        ok = ok.astype(bool)
+
+        mask = ok & (depth > 0)
+        u = u[mask]
+        v = v[mask]
+
+        if len(u) < 3:
+            return [0.0, 0.0, 0.0, 0.0]
+
+        # Calculate projected area
+        x_min, x_max = int(min(u)), int(max(u))
+        y_min, y_max = int(min(v)), int(max(v))
+
+        x_min, x_max = [max(min(x, camera.width), 0) for x in [x_min, x_max]]
+        y_min, y_max = [max(min(y, camera.height), 0) for y in [y_min, y_max]]
+
+        return [x_min, y_min, x_max, y_max]
 
     def add_visible_camera(self, camera_name: str):
         """Add a camera to the list of cameras where this object is visible."""
@@ -358,21 +431,21 @@ class ObjectInfo(DataObject):
 
         # Short-circuit if projection is invalid
         if not np.all(ok) or not np.all(depth > 0):
-            return self._basic_description(frame, camera)
+            return self.basic_description(frame, camera)
 
         # Ensure coordinates fall within image bounds
         if not (
             np.all((0 <= u) & (u <= camera.width))
             and np.all((0 <= v) & (v <= camera.height))
         ):
-            return self._basic_description(frame, camera)
+            return self.basic_description(frame, camera)
 
         # Calculate mean image position
         u_mean, v_mean = u.mean(), v.mean()
 
         # Avoid NaNs if projection is empty
         if np.isnan(u_mean) or np.isnan(v_mean):
-            return self._basic_description(frame, camera)
+            return self.basic_description(frame, camera)
 
         # Determine image region (rule of thirds)
         horiz = (
@@ -390,24 +463,19 @@ class ObjectInfo(DataObject):
         # Combine all parts
         return f"{self.get_object_description()} in the {location_description} of the {camera.get_camera_name()} camera, {self._heading_text(frame, camera)}"
 
-    def _basic_description(self, frame: "FrameInfo", camera: "CameraInfo") -> str:
+    def basic_description(self, frame: "FrameInfo", camera: "CameraInfo") -> str:
         return f"{self.get_object_description()}, {self._heading_text(frame, camera)}"
 
     def _heading_text(self, frame: "FrameInfo", camera: "CameraInfo") -> str:
         ego_relative = self.get_ego_relative_location_description(frame)
-        camera_heading = self.get_camera_heading_text(camera, frame)
+        camera_heading = self.get_camera_heading_direction(frame, camera)
         if camera_heading is not None:
             return f"heading {camera_heading} in the {camera.get_camera_name()} camera, {ego_relative}"
         else:
             return f"in the {camera.get_camera_name()} camera, {ego_relative}"
 
-    def get_camera_heading_text(
-        self, camera: "CameraInfo", frame: "FrameInfo", include_z: bool = False
-    ) -> str:
-        """Returns heading choice -> returns one of 'towards', 'away', 'left', 'right'"""
-        if self.type == "TYPE_SIGN":
-            return None
-
+    def get_heading_vector(self) -> np.ndarray:
+        """Get the objects heading vector."""
         obj_centre = self.get_centre().reshape(1, 3)
 
         box = self.camera_synced_box if self.camera_synced_box is not None else self.box
@@ -420,6 +488,26 @@ class ObjectInfo(DataObject):
 
         # Scale the heading vector to a reasonable length
         heading_vector = heading_vector * box["length"] * 0.5
+
+        return heading_vector
+
+    def get_camera_heading_direction(
+        self,
+        frame: "FrameInfo",
+        camera: "CameraInfo",
+        ignore_sign: bool = True,
+    ) -> HeadingType:
+        """Returns heading choice -> returns one of 'towards', 'away', 'left', 'right'"""
+        if (self.type == "TYPE_SIGN") and ignore_sign:
+            return None
+
+        obj_centre = self.get_centre().reshape(1, 3)
+
+        box = self.camera_synced_box if self.camera_synced_box is not None else self.box
+        # Create a point slightly ahead of the object in its heading direction
+        heading_angle = box["heading"]
+
+        heading_vector = self.get_heading_vector()
 
         # Create a new point by adding the heading vector to the object's position
         ahead_point = obj_centre + heading_vector
@@ -434,29 +522,135 @@ class ObjectInfo(DataObject):
         # Normalize the vector for direction determination
         normalized_vector = vector.reshape(3) / np.linalg.norm(vector)
 
-        if not include_z:
-            # only left/right or towards/away (remove z axis)
-            normalized_vector = normalized_vector[:2]
+        # only left/right or towards/away (remove z axis)
+        normalized_vector = normalized_vector[:2]
 
         # Find the dominant direction
         max_axis = np.argmax(np.abs(normalized_vector))
 
         if max_axis == 0:  # X-axis dominates (left-right)
             if normalized_vector[max_axis] > 0:
-                return "away"
+                return HeadingType.AWAY
             else:
-                return "towards"
+                return HeadingType.TOWARDS
         elif max_axis == 1:  # Y-axis dominates (up-down)
             if normalized_vector[max_axis] > 0:
-                return "left"
+                return HeadingType.LEFT
             else:
-                return "right"
+                return HeadingType.RIGHT
 
-        else:  # Z-axis dominates (towards-away)
+    def get_camera_movement_direction(
+        self,
+        camera: "CameraInfo",
+        frame: "FrameInfo",
+        ignore_sign: bool = True,
+    ) -> MovementType:
+        """Returns heading choice -> returns one of 'towards', 'away', 'left', 'right'"""
+        if (self.type == "TYPE_SIGN") and ignore_sign:
+            return None
+
+        if self.is_object_moving():
+            return MovementType.NOT_MOVING
+
+        obj_centre = self.get_centre().reshape(1, 3)
+
+        # Create a new point by adding the movement vector to the object's position
+        ahead_point = obj_centre + self.get_vector()
+
+        # Project the points to camera coordinates
+        obj_centre_cam = camera.project_to_camera_xyz(obj_centre).reshape(3)
+        ahead_point_cam = camera.project_to_camera_xyz(ahead_point).reshape(3)
+
+        # Calculate movement vector in camera coordinates
+        vector = ahead_point_cam - obj_centre_cam
+
+        # Normalize the vector for direction determination
+        normalized_vector = vector.reshape(3) / np.linalg.norm(vector)
+
+        # only left/right or towards/away (remove z axis)
+        normalized_vector = normalized_vector[:2]
+
+        # Find the dominant direction
+        max_axis = np.argmax(np.abs(normalized_vector))
+        assert (max_axis == 0) or (max_axis == 1)
+
+        if max_axis == 0:  # X-axis dominates (left-right)
             if normalized_vector[max_axis] > 0:
-                return "up"
+                return MovementType.AWAY
             else:
-                return "down"
+                return MovementType.TOWARDS
+        else:  # Y-axis dominates (up-down)
+            if normalized_vector[max_axis] > 0:
+                return MovementType.LEFT
+            else:
+                return MovementType.RIGHT
+
+    def get_vector(self) -> float:
+        """Get the object vector in m/s."""
+        if self.metadata is None:
+            return np.zeros((3,), dtype=float)
+
+        speed_x = float(self.metadata.get("speed_x", 0.0))
+        speed_y = float(self.metadata.get("speed_y", 0.0))
+        speed_z = float(self.metadata.get("speed_z", 0.0))
+
+        return np.array([speed_x, speed_y, speed_z], dtype=float)
+
+    def get_speed(self) -> float:
+        """Get the object scalar speed in m/s."""
+        if (
+            self.metadata is not None
+            and "speed_x" in self.metadata
+            and "speed_y" in self.metadata
+        ):
+            speed_x = float(self.metadata["speed_x"])
+            speed_y = float(self.metadata["speed_y"])
+            return np.sqrt(speed_x**2 + speed_y**2)
+
+        print(
+            f"Object has no speed attributes",
+            self.metadata,
+            self.metadata.keys() if self.metadata is not None else [],
+        )
+        return 0.0
+
+    def get_accel(self) -> np.ndarray:
+        """Get the object acceleration in m/s**2."""
+        if (
+            self.metadata is not None
+            and "accel_x" in self.metadata
+            and "accel_y" in self.metadata
+        ):
+            return np.array(
+                [float(self.metadata["accel_x"]), float(self.metadata["accel_y"])],
+                dtype=float,
+            )
+
+        print(
+            f"Object has no accel attributes",
+            self.metadata,
+            self.metadata.keys() if self.metadata is not None else [],
+        )
+        return np.zeros((2,), dtype=float)
+
+    def is_object_moving(self) -> bool:
+        """Checks if the object is moving"""
+        if self.type is None:
+            return False
+
+        return self.get_speed() > OBJECT_SPEED_THRESH[self.type]
+
+    def get_speed_category(self) -> str:
+        """Get speed category string."""
+        speed = self.get_speed()
+        if self.type is None:
+            return False
+
+        for speed_cat, lwbnd, upbnd in OBJECT_SPEED_CATS[self.type]:
+            if (speed >= lwbnd) and (speed <= upbnd):
+                return speed_cat
+
+        return "Stationary"
 
     def __repr__(self) -> str:
         text = f"Object #{self.id} timestamp={self.timestamp}"
