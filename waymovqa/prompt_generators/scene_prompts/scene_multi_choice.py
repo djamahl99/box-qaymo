@@ -179,7 +179,7 @@ class BaseSceneChoicePromptGenerator(BasePromptGenerator):
         return MultipleChoiceMetric
 
 
-@register_prompt_generator
+# @register_prompt_generator
 class SceneMultipleImageMultiChoicePromptGenerator(BaseSceneChoicePromptGenerator):
     """Generates multi-image questions."""
 
@@ -202,6 +202,7 @@ class SceneMultipleImageMultiChoicePromptGenerator(BaseSceneChoicePromptGenerato
                         scene_id=question["scene_id"],
                         timestamp=question["timestamp"],
                         generator_name=f"{self.__class__.__module__}.{self.__class__.__name__}",
+                        question_name="scene_question",
                     ),
                     MultipleChoiceAnswer(
                         choices=answer["choices"], answer=answer["answer"]
@@ -331,7 +332,7 @@ class SceneMultipleImageMultiChoicePromptGenerator(BaseSceneChoicePromptGenerato
         plt.close()
 
 
-@register_prompt_generator
+# @register_prompt_generator
 class SceneSingleImageMultiChoicePromptGenerator(BaseSceneChoicePromptGenerator):
     """Generates single-image questions."""
 
@@ -365,6 +366,7 @@ class SceneSingleImageMultiChoicePromptGenerator(BaseSceneChoicePromptGenerator)
                         scene_id=question["scene_id"],
                         timestamp=question["timestamp"],
                         generator_name=f"{self.__class__.__module__}.{self.__class__.__name__}",
+                        question_name="scene_question",
                     ),
                     MultipleChoiceAnswer(
                         choices=answer["choices"], answer=answer["answer"]

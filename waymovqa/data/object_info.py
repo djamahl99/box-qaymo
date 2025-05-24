@@ -495,17 +495,11 @@ class ObjectInfo(DataObject):
         self,
         frame: "FrameInfo",
         camera: "CameraInfo",
-        ignore_sign: bool = True,
     ) -> HeadingType:
         """Returns heading choice -> returns one of 'towards', 'away', 'left', 'right'"""
-        if (self.type == "TYPE_SIGN") and ignore_sign:
-            return None
-
         obj_centre = self.get_centre().reshape(1, 3)
 
         box = self.camera_synced_box if self.camera_synced_box is not None else self.box
-        # Create a point slightly ahead of the object in its heading direction
-        heading_angle = box["heading"]
 
         heading_vector = self.get_heading_vector()
 
@@ -543,11 +537,8 @@ class ObjectInfo(DataObject):
         self,
         camera: "CameraInfo",
         frame: "FrameInfo",
-        ignore_sign: bool = True,
     ) -> MovementType:
         """Returns heading choice -> returns one of 'towards', 'away', 'left', 'right'"""
-        if (self.type == "TYPE_SIGN") and ignore_sign:
-            return None
 
         if self.is_object_moving():
             return MovementType.NOT_MOVING

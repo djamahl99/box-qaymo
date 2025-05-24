@@ -30,6 +30,96 @@ from waymovqa.primitives import WAYMO_LABEL_TYPES
 
 from functools import partial
 
+DISTANCE_BOUND = 10.0
+MIN_LIDAR_PTS = 10
+
+OBJECT_SPEED_CATS_QUESTIONS = {
+    "TYPE_UNKNOWN": [],
+    "TYPE_VEHICLE": [
+        ("stationary", "Are there any stationary vehicles facing {}?"),  # up to 10km/h
+        (
+            "slow speed",
+            "Are there any vehicles travelling at a slow speed facing {}?",
+        ),  # up to 40 km/h
+        (
+            "medium speed",
+            "Are there any vehicles travelling at a medium speed facing {}?",
+        ),  # up to 70 km/h
+        (
+            "highway speed",
+            "Are there any vehicles travelling at highway speed facing {}?",
+        ),
+    ],
+    "TYPE_PEDESTRIAN": [
+        ("stationary", "Are there any stationary pedestrians facing {}?"),
+        ("walking", "Are there any pedestrians walking and facing {}?"),
+        ("jogging", "Are there any pedestrians jogging and facing {}?"),
+        ("running", "Are there any pedestrians running and facing {}?"),
+    ],  # jogging about 7mins/km and running faster than 3.0 m/s
+    "TYPE_SIGN": [("stationary", "Are there any signs facing {}?")],
+    "TYPE_CYCLIST": [
+        (
+            "stationary",
+            "Are there any stationary cyclists facing {}?",
+        ),  # up to a bit faster than walking speed
+        (
+            "slow moving",
+            "Are there any slow moving cyclists facing {}?",
+        ),  # up to 30 km/h
+        (
+            "fast",
+            "Are there any fast moving cyclists facing {}?",
+        ),  # any faster than 30km/h
+    ],
+}
+
+OBJECT_SPEED_CATS_QUESTIONS_MOVING = {
+    "TYPE_UNKNOWN": [],
+    "TYPE_VEHICLE": [
+        ("stationary", "Are there any stationary vehicles?"),  # up to 10km/h
+        (
+            "slow speed",
+            "Are there any vehicles travelling at a slow speed {}?",
+        ),  # up to 40 km/h
+        (
+            "medium speed",
+            "Are there any vehicles travelling at a medium speed {}?",
+        ),  # up to 70 km/h
+        (
+            "highway speed",
+            "Are there any vehicles travelling at highway speed {}?",
+        ),
+    ],
+    "TYPE_PEDESTRIAN": [
+        ("stationary", "Are there any stationary pedestrians?"),
+        ("walking", "Are there any pedestrians walking {}?"),
+        ("jogging", "Are there any pedestrians jogging {}?"),
+        ("running", "Are there any pedestrians running {}?"),
+    ],  # jogging about 7mins/km and running faster than 3.0 m/s
+    "TYPE_SIGN": [("stationary", "Are there any signs?")],
+    "TYPE_CYCLIST": [
+        (
+            "stationary",
+            "Are there any stationary cyclists?",
+        ),  # up to a bit faster than walking speed
+        (
+            "slow moving",
+            "Are there any cyclists going slowly {}?",
+        ),  # up to 30 km/h
+        (
+            "fast",
+            "Are there any cyclists going fast {}?",
+        ),  # any faster than 30km/h
+    ],
+}
+
+DIRECTION_STRINGS = {
+    "towards": "towards the camera",
+    "left": "towards the left of the camera",
+    "right": "towards the right of the camera",
+    "away": "away from the camera",
+}
+
 
 @register_prompt_generator
 class ObjectBinaryPromptGenerator(BasePromptGenerator):
@@ -37,34 +127,72 @@ class ObjectBinaryPromptGenerator(BasePromptGenerator):
 
     def __init__(self) -> None:
         super().__init__()
-        self.negative_sample_ratio = 0.5  # 30% negative samples
+        self.negative_sample_ratio = 0.5  # 50% negative samples
 
         self.prompt_functions = [
             self._object_facing_type,
             self._object_movement_direction_type,
         ]
 
-    def _object_movement_direction_type(self, camera, frame):
+    def check_object(
+        self, obj: ObjectInfo, camera: CameraInfo, frame: FrameInfo
+    ) -> bool:
+        """Check object for distance, num_lidar_pts, visibility etc."""
+        if obj.type in ["TYPE_UNKNOWN", "TYPE_SIGN"]:
+            return False
+
+        if not obj.is_visible_on_camera(frame, camera):
+            return False
+
+        movement_dir_txt = obj.get_camera_movement_direction(camera, frame)
+        if not movement_dir_txt:
+            return False
+
+        obj_type = obj.type
+        if obj_type is None:
+            return False
+
+        if np.linalg.norm(obj.get_centre()) > DISTANCE_BOUND:
+            return False
+
+        if getattr(obj, "num_lidar_points_in_box", 0.0) < MIN_LIDAR_PTS:
+            return False
+
+        return True
+
+    def _format_object_facing_type_question(
+        self, obj_type: str, heading: str, movement_status: str
+    ) -> str:
+        """Format with specific grammar for each movement status, as the template doesn't always make sense."""
+        for movement_cat, template in OBJECT_SPEED_CATS_QUESTIONS[obj_type]:
+            if movement_cat == movement_status:
+                return template.format(DIRECTION_STRINGS[heading])
+
+        return f"Are there any {movement_status} {WAYMO_TYPE_MAPPING[obj_type].lower()}s facing {DIRECTION_STRINGS[heading]}?"
+
+    def _format_object_movement_type_question(
+        self, obj_type: str, movement_dir: str, movement_status: str
+    ) -> str:
+        """Format with specific grammar for each movement status, as the template doesn't always make sense."""
+        for movement_cat, template in OBJECT_SPEED_CATS_QUESTIONS_MOVING[obj_type]:
+            if movement_cat == movement_status:
+                return template.format(DIRECTION_STRINGS[movement_dir])
+
+        if movement_status == "stationary":
+            return f"Are there any stationary {WAYMO_TYPE_MAPPING[obj_type].lower()}s?"
+        else:
+            return f"Are there any {WAYMO_TYPE_MAPPING[obj_type].lower()}s that are {movement_status} and moving {DIRECTION_STRINGS[movement_dir]}?"
+
+    def _object_movement_direction_type(self, camera: CameraInfo, frame: FrameInfo):
         """Generates binary questions about object type, movement status (moving or static) and movement direction."""
         direction_counts = defaultdict(int)
 
         for obj in frame.objects:
-            if obj.type in ["TYPE_UNKNOWN", "TYPE_SIGN"]:
-                continue
-
-            if not obj.is_visible_on_camera(frame, camera):
-                continue
-
-            movement_dir_txt = obj.get_camera_movement_direction(camera, frame)
-            if not movement_dir_txt:
-                continue
-
-            obj_type = obj.type
-            if obj_type is None:
+            if not self.check_object(obj, camera, frame):
                 continue
 
             movement_status = obj.get_speed_category()
-            key = (obj_type, movement_dir_txt, movement_status)
+            key = (obj.type, movement_status.value, movement_status)
             direction_counts[key] += 1
 
         questions = []
@@ -78,7 +206,9 @@ class ObjectBinaryPromptGenerator(BasePromptGenerator):
         ), count in direction_counts.items():
             answer = "yes" if count > 0 else "no"
             questions.append(
-                f"Are there any {movement_status} {WAYMO_TYPE_MAPPING[obj_type].lower()}s moving {movement_dir_txt} in the camera image?"
+                self._format_object_movement_type_question(
+                    obj_type, movement_dir_txt, movement_status
+                )
             )
             answers.append(answer)
 
@@ -127,7 +257,9 @@ class ObjectBinaryPromptGenerator(BasePromptGenerator):
         # Add the negative samples using the generated combinations
         for obj_type, movement_dir_txt, movement_status in negative_combinations:
             questions.append(
-                f"Are there any {movement_status} {WAYMO_TYPE_MAPPING[obj_type].lower()}s moving {movement_dir_txt} in the camera image?"
+                self._format_object_movement_type_question(
+                    obj_type, movement_dir_txt, movement_status
+                )
             )
             answers.append("no")
 
@@ -138,21 +270,10 @@ class ObjectBinaryPromptGenerator(BasePromptGenerator):
         heading_counts = defaultdict(int)
 
         for obj in frame.objects:
-            if obj.type in ["TYPE_UNKNOWN", "TYPE_SIGN"]:
+            if not self.check_object(obj, camera, frame):
                 continue
 
-            if not obj.is_visible_on_camera(frame, camera):
-                continue
-
-            heading_txt = obj.get_camera_heading_direction(frame, camera)
-            if heading_txt is None:
-                continue
-
-            obj_type = obj.type
-            if obj_type is None:
-                continue
-
-            heading = obj.get_camera_heading_direction(frame, camera)
+            heading_txt = obj.get_camera_heading_direction(frame, camera).value
             movement_status = obj.get_speed_category()
             key = (obj_type, heading_txt, movement_status)
             heading_counts[key] += 1
@@ -164,7 +285,9 @@ class ObjectBinaryPromptGenerator(BasePromptGenerator):
         for (obj_type, heading, movement_status), count in heading_counts.items():
             answer = "yes" if count > 0 else "no"
             questions.append(
-                f"Are there any {movement_status} {WAYMO_TYPE_MAPPING[obj_type].lower()}s facing {heading} in the camera image?"
+                self._format_object_facing_type_question(
+                    obj_type, heading, movement_status
+                )
             )
             answers.append(answer)
 
@@ -213,7 +336,9 @@ class ObjectBinaryPromptGenerator(BasePromptGenerator):
         # Add the negative samples using the generated combinations
         for obj_type, heading, movement_status in negative_combinations:
             questions.append(
-                f"Are there any {movement_status} {WAYMO_TYPE_MAPPING[obj_type].lower()}s facing {heading} in the camera image?"
+                self._format_object_facing_type_question(
+                    obj_type, heading, movement_status
+                )
             )
             answers.append("no")
 
@@ -250,6 +375,7 @@ class ObjectBinaryPromptGenerator(BasePromptGenerator):
                         timestamp=frame.timestamp,
                         camera_name=camera.name,
                         generator_name=f"{self.__class__.__module__}.{self.__class__.__name__}",
+                        question_name=question_func.__name__,
                         choices=["yes", "no"],
                     )
 
@@ -373,7 +499,7 @@ class ObjectBinaryPromptGenerator(BasePromptGenerator):
         plt.close()
 
     def get_question_type(self):
-        return Union[SingleImageQuestion, MultipleImageQuestion]
+        return SingleImageMultipleChoiceQuestion
 
     def get_metric_class(self) -> str:
         return "MultipleChoiceMetric"

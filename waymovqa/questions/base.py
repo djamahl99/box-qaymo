@@ -6,6 +6,7 @@ import re
 from pydantic import BaseModel, Field, field_validator
 import json
 import numpy as np
+import uuid
 
 # TODO: tests
 
@@ -31,6 +32,8 @@ class BaseQuestion(BaseModel):
     data: Optional[Dict[str, Any]] = (
         None  # Custom data field for generator-specific info
     )
+    question_name: Optional[str] = None
+    question_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
 
     @classmethod
     def from_dict(cls, data: Dict):

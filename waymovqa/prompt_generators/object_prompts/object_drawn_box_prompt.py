@@ -13,7 +13,7 @@ from io import BytesIO
 
 from waymovqa.answers.multiple_choice import MultipleChoiceAnswer
 from waymovqa.questions.single_image_multi_choice import (
-    SingleBase64ImageMultipleChoiceQuestion,
+    SingleImageMultipleChoiceQuestion,
 )
 from waymovqa.data.scene_info import SceneInfo
 from waymovqa.data.object_info import (
@@ -158,7 +158,7 @@ class ObjectDrawnBoxPromptGenerator(BasePromptGenerator):
 
     def generate(
         self, frames
-    ) -> List[Tuple[SingleBase64ImageMultipleChoiceQuestion, MultipleChoiceAnswer]]:
+    ) -> List[Tuple[SingleImageMultipleChoiceQuestion, MultipleChoiceAnswer]]:
         """Generates questions about objects with bounding boxes drawn on the frame."""
         samples = []
 
@@ -172,16 +172,16 @@ class ObjectDrawnBoxPromptGenerator(BasePromptGenerator):
             if not obj.is_visible_on_camera(frame, camera):
                 continue
 
-            img_vis = cv2.imread(camera.image_path)  # type: ignore
+            # img_vis = cv2.imread(camera.image_path)  # type: ignore
 
-            x1, y1, x2, y2 = obj.get_object_bbox_2d(frame, camera)
+            # x1, y1, x2, y2 = obj.get_object_bbox_2d(frame, camera)
 
-            cv2.rectangle(
-                img_vis, (x1, y1), (x2, y2), OBJECT_COLOR, OBJECT_RECT_THICKNESS  # type: ignore
-            )
+            # cv2.rectangle(
+            #     img_vis, (x1, y1), (x2, y2), OBJECT_COLOR, OBJECT_RECT_THICKNESS  # type: ignore
+            # )
 
-            _, buffer = cv2.imencode(".jpg", img_vis)  # or '.png'
-            img_base64 = base64.b64encode(buffer).decode("utf-8")
+            # _, buffer = cv2.imencode(".jpg", img_vis)  # or '.png'
+            # img_base64 = base64.b64encode(buffer).decode("utf-8")
 
             for prompt_func in self.prompt_functions:
                 prompt_out = prompt_func(obj, camera, frame)
@@ -226,15 +226,18 @@ class ObjectDrawnBoxPromptGenerator(BasePromptGenerator):
                 # Create the question with formatted options
                 question_text = question_template.format(formatted_options)
 
-                question = SingleBase64ImageMultipleChoiceQuestion(
-                    image_base64=img_base64,
-                    image_path=camera.image_path,
+                x1, y1, x2, y2 = obj.get_object_bbox_2d(frame, camera)
+
+                question = SingleImageMultipleChoiceQuestion(
+                    # image_base64=img_base64,
+                    image_path=camera.image_path,  # type: ignore
                     question=question_text,
                     choices=choices,
                     scene_id=obj.scene_id,
                     timestamp=frame.timestamp,
                     camera_name=camera.name,
                     generator_name=f"{self.__class__.__module__}.{self.__class__.__name__}",
+                    question_name=prompt_func.__name__,
                     data=dict(bbox=[x1, y1, x2, y2]),
                 )
 
@@ -249,7 +252,7 @@ class ObjectDrawnBoxPromptGenerator(BasePromptGenerator):
 
     def visualise_sample(
         self,
-        question_obj: SingleBase64ImageMultipleChoiceQuestion,
+        question_obj: SingleImageMultipleChoiceQuestion,
         answer_obj: MultipleChoiceAnswer,
         save_path,
         frames,
@@ -372,4 +375,4 @@ class ObjectDrawnBoxPromptGenerator(BasePromptGenerator):
         return MultipleChoiceAnswer
 
     def get_question_type(self):
-        return SingleBase64ImageMultipleChoiceQuestion
+        return SingleImageMultipleChoiceQuestion

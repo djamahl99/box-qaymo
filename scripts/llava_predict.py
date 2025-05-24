@@ -230,6 +230,15 @@ def run_on_dataset(
                 batch_image_paths.append(image_path)
                 batch_questions.append(question)
                 batch_gt_answers.append(gt_answer)
+        elif isinstance(question, SingleImageQuestion) and isinstance(
+            gt_answer, MultipleChoiceAnswer
+        ):
+            prompt = f'{question.question}\nRespond with only the full name of your selection (e.g., "{gt_answer.choices[0]}")..'
+
+            batch_text_strs.append(prompt)
+            batch_image_paths.append(image_path)
+            batch_questions.append(question)
+            batch_gt_answers.append(gt_answer)
         else:
             raise TypeError(
                 f"Question type {question.__class__.__name__} not valid for this model"
@@ -376,7 +385,7 @@ def process_batch(
     response_dict = {}
     for i, response in enumerate(responses):
         question = batch_questions[i]
-        question_id = id(question)  # Use object id as a unique identifier
+        question_id = question.question_id  # Use object id as a unique identifier
 
         if question_id not in response_dict:
             response_dict[question_id] = {"question": question, "responses": []}
@@ -388,16 +397,21 @@ def process_batch(
         question = question_data["question"]
         responses = question_data["responses"]
 
+        print("question", question)
+        print("responses", responses)
+
         if isinstance(question, SingleImageMultipleChoiceQuestion):
             # Only one response for single prompt questions
             answer = parse_multiple_choice_response(responses[0], question.choices)
             answer = MultipleChoiceAnswer(answer=answer, choices=question.choices)
 
-        elif isinstance(question, SingleImageMultiplePromptQuestion):
-            # Multiple responses for multiple prompt questions
-            answer = determine_best_answer_from_prompts(responses, question.choices)
-            answer = MultipleChoiceAnswer(answer=answer, choices=question.choices)
+        # elif isinstance(question, SingleImageMultiplePromptQuestion):
+        #     # Multiple responses for multiple prompt questions
+        #     answer = determine_best_answer_from_prompts(responses, question.choices)
+        #     answer = MultipleChoiceAnswer(answer=answer, choices=question.choices)
 
+        else:
+            raise TypeError(f'question should be multiple choice {question.__class__.__name__}')
         pred_dataset.add_sample(question, answer)
 
 

@@ -49,170 +49,76 @@ DEFAULT_CONFIG = {
     "consider_stationary_objects": True,  # Whether to include stationary objects in some questions
     "max_camera_distance": 800,  # pixels between query objects
 }
+# Constants for trajectory analysis
+MOVEMENT_THRESHOLDS = {
+    "min_object_speed": 1.0,
+    "speed_multiplier": 0.8,
+    "convergence_threshold": 0.3,  # Lowered - more lenient for approaching
+    "divergence_threshold": -0.3,  # Separate threshold for diverging
+    "heading_threshold": 0.3,
+    "divergence_heading_threshold": -0.1,
+    "min_lidar_points": 10,
+    "consistency_frames": 3,
+    "min_distance": 2.0,
+}
+
+SCENARIO_THRESHOLDS = {
+    "head_on_convergence": -0.95,
+    "head_on_heading": 0.95,
+    "strong_heading": 0.6,
+    "weak_heading": 0.3,
+    "parallel_threshold": 0.7,
+    "divergence_threshold": -0.5,
+}
+
+DISTANCE_BOUNDS = {
+    "Pedestrian": (2.0, 10.0),
+    "Cyclist": (2.0, 15.0),
+    "Vehicle": (2.0, 25.0),
+}
+
+SCENARIO_TEMPLATES = {
+    "head_on": [
+        "Are the ego vehicle and the {} traveling directly towards each other?",
+        "Is the {} on a direct collision course with the ego vehicle?",
+        "Are the ego vehicle and the {} moving head-on towards each other?",
+    ],
+    "object_approaching": [
+        "Is the {} moving towards the ego vehicle?",
+        "Is the {} approaching the ego vehicle?",
+        "Is the {} heading towards the ego vehicle?",
+    ],
+    "ego_approaching": [
+        "Is the ego vehicle moving towards the {}?",
+        "Is the ego vehicle approaching the {}?",
+        "Is the ego vehicle heading towards the {}?",
+    ],
+    "general_convergence": [
+        "Are the ego vehicle and the {} getting closer to each other?",
+        "Is the distance between the ego vehicle and the {} decreasing?",
+        "Are the ego vehicle and the {} converging?",
+    ],
+    "parallel_diverging": [
+        "Are the ego vehicle and the {} moving in the same direction away from each other?",
+        "Is the {} moving away from the ego vehicle in the same direction?",
+    ],
+    "object_diverging": [
+        "Is the {} moving away from the ego vehicle?",
+        "Is the {} heading away from the ego vehicle?",
+    ],
+    "ego_diverging": [
+        "Is the ego vehicle moving away from the {}?",
+        "Is the ego vehicle heading away from the {}?",
+    ],
+    "general_divergence": [
+        "Are the ego vehicle and the {} moving apart?",
+        "Is the distance between the ego vehicle and the {} increasing?",
+    ],
+}
+
 
 HZ = 10.0
 FRAME_DELTA = 1.0 / HZ
-
-
-def did_pedestrian_cross_lane(
-    ped_trajectory, left_lane_positions, right_lane_positions
-):
-    """
-    Determine if pedestrian trajectory crosses the lane defined by left/right boundaries.
-
-    Args:
-        ped_trajectory: List of [x, y, z] positions for pedestrian
-        left_lane_positions: List of [x, y, z] positions for left lane boundary
-        right_lane_positions: List of [x, y, z] positions for right lane boundary
-
-    Returns:
-        dict with crossing info
-    """
-    ped_trajectory = np.array(ped_trajectory)
-    left_lane = np.array(left_lane_positions)
-    right_lane = np.array(right_lane_positions)
-
-    crossing_events = []
-
-    # Method 1: Check if pedestrian path intersects lane boundaries
-    for i in range(len(ped_trajectory) - 1):
-        ped_start = ped_trajectory[i]
-        ped_end = ped_trajectory[i + 1]
-
-        # Check intersection with left lane boundary
-        left_intersections = find_line_intersections(ped_start, ped_end, left_lane)
-        right_intersections = find_line_intersections(ped_start, ped_end, right_lane)
-
-        if left_intersections or right_intersections:
-            crossing_events.append(
-                {
-                    "frame_idx": i,
-                    "position": ped_start,
-                    "intersected_left": bool(left_intersections),
-                    "intersected_right": bool(right_intersections),
-                }
-            )
-
-    # Method 2: Check if pedestrian goes from one side of lane to the other
-    side_changes = detect_lane_side_changes(ped_trajectory, left_lane, right_lane)
-
-    return {
-        "crossed_lane": len(crossing_events) > 0 or len(side_changes) > 0,
-        "crossing_events": crossing_events,
-        "side_changes": side_changes,
-        "crossing_frames": [event["frame_idx"] for event in crossing_events],
-    }
-
-
-def find_line_intersections(point1, point2, lane_boundary):
-    """Find where line segment (point1, point2) intersects with lane boundary."""
-    intersections = []
-
-    # Check intersection with each segment of the lane boundary
-    for i in range(len(lane_boundary) - 1):
-        lane_start = lane_boundary[i]
-        lane_end = lane_boundary[i + 1]
-
-        intersection = line_segment_intersection_2d(
-            point1[:2], point2[:2], lane_start[:2], lane_end[:2]
-        )
-
-        if intersection is not None:
-            intersections.append(intersection)
-
-    return intersections
-
-
-def line_segment_intersection_2d(p1, p2, p3, p4):
-    """
-    Find intersection point of two line segments in 2D.
-    Returns None if no intersection, otherwise returns [x, y].
-    """
-    x1, y1 = p1
-    x2, y2 = p2
-    x3, y3 = p3
-    x4, y4 = p4
-
-    denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
-    if abs(denom) < 1e-10:  # Lines are parallel
-        return None
-
-    t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom
-    u = -((x1 - x2) * (y1 - y3) - (y1 - y2) * (x1 - x3)) / denom
-
-    # Check if intersection is within both line segments
-    if 0 <= t <= 1 and 0 <= u <= 1:
-        x = x1 + t * (x2 - x1)
-        y = y1 + t * (y2 - y1)
-        return np.array([x, y])
-
-    return None
-
-
-def detect_lane_side_changes(ped_trajectory, left_lane, right_lane):
-    """
-    Detect when pedestrian changes from one side of the lane to the other.
-    """
-    side_changes = []
-    previous_side = None
-
-    for i, ped_pos in enumerate(ped_trajectory):
-        current_side = determine_lane_side(ped_pos, left_lane, right_lane)
-
-        if (
-            previous_side is not None
-            and current_side != previous_side
-            and current_side is not None
-        ):
-            side_changes.append(
-                {
-                    "frame_idx": i,
-                    "from_side": previous_side,
-                    "to_side": current_side,
-                    "position": ped_pos,
-                }
-            )
-
-        previous_side = current_side
-
-    return side_changes
-
-
-def determine_lane_side(point, left_lane, right_lane):
-    """
-    Determine which side of the lane a point is on.
-    Returns 'left', 'right', 'inside', or None
-    """
-    # Find closest points on each lane boundary
-    left_distances = cdist([point[:2]], left_lane[:, :2])[0]
-    right_distances = cdist([point[:2]], right_lane[:, :2])[0]
-
-    closest_left_idx = np.argmin(left_distances)
-    closest_right_idx = np.argmin(right_distances)
-
-    closest_left_point = left_lane[closest_left_idx]
-    closest_right_point = right_lane[closest_right_idx]
-
-    # Create a vector from right to left boundary (across the lane)
-    lane_vector = closest_left_point[:2] - closest_right_point[:2]
-
-    # Vector from right boundary to the point
-    point_vector = point[:2] - closest_right_point[:2]
-
-    # Cross product to determine side
-    cross_product = np.cross(lane_vector, point_vector)
-
-    # Also check if point is between the boundaries
-    dist_to_left = np.linalg.norm(point[:2] - closest_left_point[:2])
-    dist_to_right = np.linalg.norm(point[:2] - closest_right_point[:2])
-    lane_width = np.linalg.norm(closest_left_point[:2] - closest_right_point[:2])
-
-    if dist_to_left + dist_to_right <= lane_width * 1.1:  # Small tolerance
-        return "inside"
-    elif cross_product > 0:
-        return "left"
-    else:
-        return "right"
 
 
 @register_prompt_generator
@@ -240,6 +146,7 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
             self._prompt_moving_towards_ego,
             self._prompt_parallel_motion,
             self._prompt_approaching_stop_sign,
+            self._prompt_vehicle_future_path,
             self._prompt_ego_following,
         ]
 
@@ -608,11 +515,41 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
         results = []
         choices = ["yes", "no"]
 
+        # Constants for clarity
+        APPROACH_THRESHOLD_MULTIPLIER = -1.0
+        DEPARTURE_THRESHOLD_MULTIPLIER = 1.0
+        MAX_CONFIDENCE_SPEED = (
+            OBJECT_SPEED_THRESH["TYPE_VEHICLE"] * 2.0
+        )  # Cap confidence calculation
+        MIN_MEANINGFUL_SPEED = (
+            0.5  # m/s - minimum speed to consider meaningful approach/departure
+        )
+
         templates = [
             "Is the ego vehicle approaching a stop sign?",
             "Is there a stop sign ahead that the ego vehicle is approaching?",
-            "Should the ego vehicle come to a stop?",
+            "Is the ego vehicle getting closer to a stop sign?",
+            "Is there a stop sign that the ego vehicle is moving towards?",
+            "Is the ego vehicle heading towards a stop sign?",
+            "Is the ego vehicle nearing a stop sign?",
+            "Can you see a stop sign that the ego vehicle is approaching?",
         ]
+
+        def _is_heading_towards_sign(
+            ego_pos: np.ndarray, ego_vector: np.ndarray, sign_pos: np.ndarray
+        ) -> bool:
+            """Check if ego vehicle is actually heading towards the sign (not just getting closer)."""
+            if np.linalg.norm(ego_vector) < 0.1:  # Very slow or stationary
+                return False
+
+            # Vector from ego to sign
+            to_sign = sign_pos - ego_pos
+            to_sign_norm = to_sign / (np.linalg.norm(to_sign) + 1e-8)
+            ego_vector_norm = ego_vector / (np.linalg.norm(ego_vector) + 1e-8)
+
+            # Dot product to check alignment (> 0.5 means roughly same direction)
+            alignment = np.dot(ego_vector_norm, to_sign_norm)
+            return alignment > 0.5
 
         def _handle_sample(
             frame_idx: int,
@@ -625,77 +562,44 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
             frame = frames[frame_idx]
 
             obj = next((obj for obj in frame.objects if obj.id == object_id), None)
-
             if obj is None:
                 return None
 
+            # Find any camera where the sign is visible (removed facing direction requirement)
             cam = next(
-                (
-                    cam
-                    for cam in frame.cameras
-                    if obj.get_camera_heading_direction(frame, cam, ignore_sign=False)
-                    == HeadingType.TOWARDS
-                    and obj.is_visible_on_camera(frame, cam)
-                ),
+                (cam for cam in frame.cameras if obj.is_visible_on_camera(frame, cam)),
                 None,
             )
-
             if cam is None:
                 return None
 
+            # Skip samples with very low speeds (not meaningful)
+            if abs(relative_speed) < MIN_MEANINGFUL_SPEED:
+                return None
+
+            # For positive samples, verify ego is actually heading towards the sign
+            if positive:
+                ego_pos = ego_positions[frame_idx]
+                ego_vector = (
+                    ego_vectors[frame_idx]
+                    if len(ego_vectors) > frame_idx
+                    else np.zeros(3)
+                )
+                sign_pos = trajectories[object_id][frame_idx]
+
+                if not _is_heading_towards_sign(ego_pos, ego_vector, sign_pos):
+                    return None
+
+                if obj.get_camera_heading_direction(frame, cam) != HeadingType.TOWARDS:
+                    return None
+
             template = random.choice(templates)
+            speed_magnitude = abs(relative_speed)
 
             if positive:
-                answer_description = f"approaching stop sign at {relative_speed:.2f} m/s, currently {distance:.2f} metres away."
+                answer_description = f"approaching stop sign at {speed_magnitude:.2f} m/s, currently {distance:.2f} metres away."
             else:
-                answer_description = f"driving away from stop sign at {relative_speed:.2f} m/s, currently {distance:.2f} metres away."
-
-            # DEBUGGING #############################
-            img_vis = cv2.imread(cam.image_path)  # type: ignore
-            x1, y1, x2, y2 = obj.get_object_bbox_2d(frame, cam)
-            cv2.rectangle(img_vis, (x1, y1), (x2, y2), (0, 0, 255), 5)  # type: ignore
-            cv2.putText(
-                img_vis,
-                f"Q: {template}",
-                (0, 50),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.8,
-                (0, 0, 255),
-                2,
-                cv2.LINE_AA,
-            )
-            cv2.putText(
-                img_vis,
-                f"answer_description: {answer_description}",
-                (0, 100),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.8,
-                (0, 0, 255),
-                2,
-                cv2.LINE_AA,
-            )
-            cv2.putText(
-                img_vis,
-                f"A: {'yes' if positive else 'no'}",
-                (0, 150),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.8,
-                (0, 0, 255),
-                2,
-                cv2.LINE_AA,
-            )
-            cv2.putText(
-                img_vis,
-                "Camera: {cam.name}",
-                (0, 200),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.8,
-                (0, 0, 255),
-                2,
-                cv2.LINE_AA,
-            )
-            cv2.imwrite("stop_sign.jpg", img_vis)
-            # DEBUGGING #############################
+                answer_description = f"driving away from stop sign at {speed_magnitude:.2f} m/s, currently {distance:.2f} metres away."
 
             return {
                 "object_id": object_id,
@@ -704,9 +608,12 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
                 "question": template,
                 "answer_description": answer_description,
                 "answer": "yes" if positive else "no",
-                "confidence": float(
-                    abs(relative_speed) / OBJECT_SPEED_THRESH["TYPE_VEHICLE"]
-                ),
+                "metadata": {
+                    "distance": distance,
+                    "relative_speed": relative_speed,
+                    "speed_magnitude": speed_magnitude,
+                    "camera_name": cam.name,
+                },
             }
 
         positive_samples = []
@@ -719,12 +626,16 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
             if cvat_label == "Stop Sign"
         ]
 
-        print("stop_sign_object_ids", stop_sign_object_ids)
-
-        # TODO: add frames where there are no stop signs (maybe do after, can then select a reasonable amount)
+        if not stop_sign_object_ids:
+            return choices, results  # No stop signs found
 
         for obj_id in stop_sign_object_ids:
+            if obj_id not in trajectories:
+                continue
+
             sign_positions = trajectories[obj_id]
+            if len(sign_positions) != len(ego_positions):
+                continue  # Skip if trajectory lengths don't match
 
             # vectors from ego -> sign
             relative_positions = (sign_positions - ego_positions).reshape(-1, 3)
@@ -740,19 +651,22 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
 
             # is the difference in positions decreasing at the vehicle "moving" speed?
             is_approaching = relative_speed < (
-                (-1) * OBJECT_SPEED_THRESH["TYPE_VEHICLE"]
+                APPROACH_THRESHOLD_MULTIPLIER * OBJECT_SPEED_THRESH["TYPE_VEHICLE"]
             )
             # is the ego moving away at a reasonable speed?
-            is_moving_away = relative_speed > OBJECT_SPEED_THRESH["TYPE_VEHICLE"]
+            is_moving_away = relative_speed > (
+                DEPARTURE_THRESHOLD_MULTIPLIER * OBJECT_SPEED_THRESH["TYPE_VEHICLE"]
+            )
 
             # find where we are close to the sign and approaching
             valid_mask = distance_mask & is_approaching
             positive_idx = np.where(valid_mask)[0]
 
             # find negative samples where we are moving away
-            negative_mask = is_moving_away
+            negative_mask = is_moving_away | (~distance_mask)
             negative_idx = np.where(negative_mask)[0]
 
+            # Process positive samples
             for frame_idx in positive_idx:
                 sample = _handle_sample(
                     frame_idx,
@@ -765,6 +679,7 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
                 if sample is not None:
                     positive_samples.append(sample)
 
+            # Process negative samples
             for frame_idx in negative_idx:
                 sample = _handle_sample(
                     frame_idx,
@@ -776,12 +691,105 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
 
                 if sample is not None:
                     negative_samples.append(sample)
-        # Combine neg + pos (balanced)
-        results = self._balance_neg_pos(negative_samples, positive_samples)
+
+        # Generate negatives from frames with signs
+        frames_with_signs = set()
+        sign_object_ids = [
+            object_id
+            for object_id, label in obj_types.items()
+            if "sign" in label.lower()
+        ]
+        for obj_id in sign_object_ids:
+            if obj_id in trajectories:
+                # Find frames where this sign is visible and close
+                sign_positions = trajectories[obj_id]
+                relative_positions = (sign_positions - ego_positions).reshape(-1, 3)
+                distances = np.linalg.norm(relative_positions, axis=1)
+                close_frames = np.where(
+                    distances < DEFAULT_CONFIG["distance_threshold"]
+                )[0]
+                frames_with_signs.update(close_frames)
+
+        # Sample frames without nearby stop signs as negatives
+        all_frames = set(range(len(frames)))
+        frames_without_signs = list(all_frames - frames_with_signs)
+
+        # Randomly sample some frames without stop signs
+        num_no_sign_negatives = min(
+            len(frames_without_signs), len(positive_samples) * 2
+        )
+        if num_no_sign_negatives > 0:
+            sampled_no_sign_frames = random.sample(
+                frames_without_signs, num_no_sign_negatives
+            )
+
+            for frame_idx in sampled_no_sign_frames:
+                frame = frames[frame_idx]
+                # Pick any available camera for the frame
+                cam = next((cam for cam in frame.cameras), None)
+                if cam is None:
+                    continue
+
+                template = random.choice(templates)
+
+                negative_samples.append(
+                    {
+                        "object_id": None,  # No specific object
+                        "positive": False,
+                        "timestamp": int(frame.timestamp),
+                        "question": template,
+                        "answer_description": "no signs visible or approaching.",
+                        "answer": "no",
+                        "metadata": {
+                            "frame_type": "no_stop_signs",
+                            "camera_name": cam.name,
+                        },
+                    }
+                )
+
+        # DON'T balance here - let VQAGenerator handle it across the full dataset
+        results.extend(positive_samples)
+        results.extend(negative_samples)
 
         return choices, results
 
-    def _prompt_vehicle_same_lane(
+    def _is_vehicle_in_same_lane(
+        self,
+        vehicle_pos: np.ndarray,  # n, 3 for n timestamps
+        road_left: np.ndarray,  # n, 3 for n timestamps
+        road_right: np.ndarray,  # n, 3 for n timestamps
+    ) -> np.ndarray:  # Returns array of bools, not single bool
+        """Check if vehicle is between the left and right road boundaries."""
+
+        # Vector from right edge to left edge (road width vector)
+        road_width_vector = road_left - road_right
+
+        # Vector from right edge to vehicle
+        right_to_vehicle = vehicle_pos - road_right
+
+        # Project vehicle position onto the road width vector
+        road_width_length_sq = np.sum(road_width_vector * road_width_vector, axis=1)
+
+        # Handle division by zero for each timestamp
+        valid_road_width = road_width_length_sq > 1e-8
+
+        # Parameter t: 0 = right edge, 1 = left edge
+        t_vehicle = np.zeros(len(vehicle_pos))  # Initialize with zeros
+        t_vehicle[valid_road_width] = (
+            np.sum(
+                right_to_vehicle[valid_road_width]
+                * road_width_vector[valid_road_width],
+                axis=1,
+            )
+            / road_width_length_sq[valid_road_width]
+        )
+
+        # Vehicle is in lane if 0 <= t <= 1
+        vehicle_in_bounds = (t_vehicle >= 0) & (t_vehicle <= 1) & valid_road_width
+
+        return vehicle_in_bounds
+
+    def _prompt_vehicle_future_path(
         self,
         trajectories,
         speeds,
@@ -797,33 +805,41 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
         results = []
         choices = ["yes", "no"]
 
-        templates = []
+        templates = [
+            "Is there a vehicle in the ego vehicle's future path?",
+            "Is there a vehicle ahead in the ego vehicle's path?",
+            "Can you see a vehicle in front of the ego vehicle?",
+            "Is there a vehicle blocking the ego vehicle's path ahead?",
+        ]
 
         def _handle_sample(
             frame_idx: int,
             object_id: str,
             distance: float,
-            relative_speed: float,
             positive: bool,
         ):
             """Handles generating a question for a positive/negative situation."""
             frame = frames[frame_idx]
 
-            obj = next((obj for obj in frame.objects if obj.id == object_id), None)
-
-            if obj is None:
-                return None
-
-            cam = next(
-                (
-                    cam
-                    for cam in frame.cameras
-                    if obj.get_camera_heading_direction(frame, cam, ignore_sign=False)
-                    == HeadingType.TOWARDS
-                    and obj.is_visible_on_camera(frame, cam)
-                ),
-                None,
+            obj = (
+                next((obj for obj in frame.objects if obj.id == object_id), None)
+                if object_id
+                else None
             )
+
+            # Find best camera - prioritize one with the object if it exists
+            if obj:
+                cam = next(
+                    (
+                        cam
+                        for cam in frame.cameras
+                        if obj.is_visible_on_camera(frame, cam)
+                    ),
+                    None,
+                )
+            else:
+                # For negative samples without specific objects, use any camera
+                cam = next((cam for cam in frame.cameras), None)
 
             if cam is None:
                 return None
@@ -831,56 +847,11 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
             template = random.choice(templates)
 
             if positive:
-                answer_description = f"approaching stop sign at {relative_speed:.2f} m/s, currently {distance:.2f} metres away."
+                answer_description = (
+                    f"vehicle in path ahead, {distance:.2f} metres away."
+                )
             else:
-                answer_description = f"driving away from stop sign at {relative_speed:.2f} m/s, currently {distance:.2f} metres away."
-
-            # DEBUGGING #############################
-            img_vis = cv2.imread(cam.image_path)  # type: ignore
-            x1, y1, x2, y2 = obj.get_object_bbox_2d(frame, cam)
-            cv2.rectangle(img_vis, (x1, y1), (x2, y2), (0, 0, 255), 5)  # type: ignore
-            cv2.putText(
-                img_vis,
-                f"Q: {template}",
-                (0, 50),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.8,
-                (0, 0, 255),
-                2,
-                cv2.LINE_AA,
-            )
-            cv2.putText(
-                img_vis,
-                f"answer_description: {answer_description}",
-                (0, 100),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.8,
-                (0, 0, 255),
-                2,
-                cv2.LINE_AA,
-            )
-            cv2.putText(
-                img_vis,
-                f"A: {'yes' if positive else 'no'}",
-                (0, 150),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.8,
-                (0, 0, 255),
-                2,
-                cv2.LINE_AA,
-            )
-            cv2.putText(
-                img_vis,
-                "Camera: {cam.name}",
-                (0, 200),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.8,
-                (0, 0, 255),
-                2,
-                cv2.LINE_AA,
-            )
-            cv2.imwrite("same_lane.jpg", img_vis)
-            # DEBUGGING #############################
+                answer_description = f"no vehicles in immediate path ahead."
 
             return {
                 "object_id": object_id,
@@ -889,20 +860,18 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
                 "question": template,
                 "answer_description": answer_description,
                 "answer": "yes" if positive else "no",
-                "confidence": float(
-                    abs(relative_speed) / OBJECT_SPEED_THRESH["TYPE_VEHICLE"]
-                ),
+                "metadata": {
+                    "distance": distance if positive else None,
+                    "camera_name": cam.name,
+                },
             }
 
-        positive_samples = []
-        negative_samples = []
-
-        # Find any Pedestrians
-        pedestrian_object_ids = [
-            object_id for object_id, label in obj_types.items() if label == "Pedestrian"
+        # Find any vehicles
+        vehicle_object_ids = [
+            object_id
+            for object_id, label in obj_types.items()
+            if "vehicle" in label.lower()
         ]
-
-        ego_position_gradient = np.gradient(ego_positions, axis=0)
 
         # Calculate the "road" based on the ego trajectory.
         road_left = []
@@ -910,8 +879,6 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
 
         for frame_idx, frame in enumerate(frames):
             world_pose = np.array(frame.pose, dtype=float).reshape(4, 4)
-
-            ego_dir = world_pose[:3, 0]
             ego_y_axis = world_pose[:3, 1]
 
             left_edge = ego_positions[frame_idx] + 1.5 * ego_y_axis
@@ -923,62 +890,93 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
         road_left = np.stack(road_left, axis=0)
         road_right = np.stack(road_right, axis=0)
 
-        for obj_id in pedestrian_object_ids:
-            pedestrian_positions = trajectories[obj_id]
+        # Store frame-level information
+        frame_samples = []  # Will store (frame_idx, obj_id, distance, is_positive)
 
-            # vectors from ego -> pedestrian
-            relative_positions = (pedestrian_positions - ego_positions).reshape(-1, 3)
+        for obj_id in vehicle_object_ids:
+            if obj_id not in trajectories:
+                continue
+
+            vehicle_positions = trajectories[obj_id]
+            if len(vehicle_positions) != len(ego_positions):
+                continue
+
+            # vectors from ego -> vehicle
+            relative_positions = (vehicle_positions - ego_positions).reshape(-1, 3)
             distances = np.linalg.norm(relative_positions, axis=1)
             distance_mask = distances < DEFAULT_CONFIG["distance_threshold"]
 
-            # Check if approaching
-            diff = np.concatenate(
-                [np.zeros((1,), dtype=float), np.diff(distances)], axis=0
+            # Normalize ego direction vectors
+            ego_speed = np.linalg.norm(ego_vectors, axis=1)
+            valid_speed = ego_speed > 0.1  # Only when ego is moving
+
+            ego_forward_normalized = np.zeros_like(ego_vectors)
+            ego_forward_normalized[valid_speed] = (
+                ego_vectors[valid_speed] / ego_speed[valid_speed, np.newaxis]
             )
-            # relative speeds (speed between ego and sign)
-            relative_speed = diff / FRAME_DELTA
 
-            # is the difference in positions decreasing at the vehicle "moving" speed?
-            is_approaching = relative_speed < (
-                (-1) * OBJECT_SPEED_THRESH["TYPE_VEHICLE"]
+            # Dot product to check if object is in front
+            forward_component = np.sum(
+                relative_positions * ego_forward_normalized, axis=1
             )
-            # is the ego moving away at a reasonable speed?
-            is_moving_away = relative_speed > OBJECT_SPEED_THRESH["TYPE_VEHICLE"]
 
-            # find where we are close to the sign and approaching
-            valid_mask = distance_mask & is_approaching
-            positive_idx = np.where(valid_mask)[0]
+            # Object is in front if projection is positive AND ego is moving
+            in_front_mask = (forward_component > 0) & valid_speed
 
-            # find negative samples where we are moving away
-            negative_mask = is_moving_away
+            # Check which frames have vehicle in same lane (for more accurate "future path")
+            same_lane_mask = self._is_vehicle_in_same_lane(
+                vehicle_positions, road_left, road_right
+            )
+
+            # DECISION: What constitutes "future path"?
+            # Option 1: Same lane ahead (more restrictive)
+            future_path_mask = distance_mask & in_front_mask & same_lane_mask
+
+            # Option 2: Any vehicle ahead (less restrictive)
+            # future_path_mask = distance_mask & in_front_mask
+
+            positive_idx = np.where(future_path_mask)[0]
+
+            # Negatives: vehicles that are close but NOT in future path
+            negative_mask = distance_mask & ~future_path_mask
             negative_idx = np.where(negative_mask)[0]
 
+            # Store positive samples
             for frame_idx in positive_idx:
-                sample = _handle_sample(
-                    frame_idx,
-                    obj_id,
-                    distances[frame_idx],
-                    relative_speed[frame_idx],
-                    positive=True,
-                )
+                frame_samples.append((frame_idx, obj_id, distances[frame_idx], True))
 
-                if sample is not None:
-                    positive_samples.append(sample)
-
+            # Store negative samples
             for frame_idx in negative_idx:
-                sample = _handle_sample(
-                    frame_idx,
-                    obj_id,
-                    distances[frame_idx],
-                    relative_speed[frame_idx],
-                    positive=False,
-                )
+                frame_samples.append((frame_idx, obj_id, distances[frame_idx], False))
 
-                if sample is not None:
-                    negative_samples.append(sample)
-        # Combine neg + pos (balanced)
+        # Add some frames with no vehicles as negatives
+        frames_with_vehicles = set(sample[0] for sample in frame_samples)
+        frames_without_vehicles = list(set(range(len(frames))) - frames_with_vehicles)
+
+        # Sample some frames without vehicles
+        num_no_vehicle_negatives = min(
+            len(frames_without_vehicles), len([s for s in frame_samples if s[3]])
+        )
+        if num_no_vehicle_negatives > 0:
+            sampled_empty_frames = random.sample(
+                frames_without_vehicles, num_no_vehicle_negatives
+            )
+            for frame_idx in sampled_empty_frames:
+                frame_samples.append((frame_idx, None, 0.0, False))
+
+        # Process all samples
+        processed_samples = []
+        for frame_idx, obj_id, distance, is_positive in frame_samples:
+            sample = _handle_sample(frame_idx, obj_id, distance, is_positive)
+            if sample is not None:
+                processed_samples.append(sample)
+
+        # Separate positive and negative for balancing
+        positive_samples = [s for s in processed_samples if s["positive"]]
+        negative_samples = [s for s in processed_samples if not s["positive"]]
+
+        # Balance and return
         results = self._balance_neg_pos(negative_samples, positive_samples)
-
         return choices, results
 
     def _prompt_faster_than_ego(
@@ -1017,13 +1015,16 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
             faster_mask = speed_ratios > threshold_factor
             valid_mask = distances < DEFAULT_CONFIG["distance_threshold"]
 
+            # moving relatively fast (e.g. vehicle speed since comparing with ego)
+            moving_fast = obj_speeds > OBJECT_SPEED_THRESH["TYPE_VEHICLE"]
+
+            all_condition = faster_mask & valid_mask & moving_fast
+
             template = random.choice(templates)
 
-            if np.any(
-                faster_mask & valid_mask & (obj_speeds > 1.0)
-            ):  # Only if moving reasonably fast
+            if np.any(all_condition):  # Only if moving reasonably fast
                 # Pick best timestamp - highest speed difference
-                best_idx = np.argmax(speed_ratios * (faster_mask & valid_mask))
+                best_idx = np.argmax(speed_ratios * all_condition)
                 timestamp = timestamps[best_idx]
                 speed_diff = obj_speeds[best_idx] - ego_speeds[best_idx]
 
@@ -1086,88 +1087,61 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
         obj_cvat_types,
         window_size=5,
     ):
+        """Generate questions about objects moving towards/away from ego vehicle."""
         results = []
         choices = ["yes", "no"]
+        positive_samples = []
+        negative_samples = []
 
         def _get_scenario_and_templates(
             convergence_factor, obj_heading_to_ego, ego_heading_to_obj
         ):
-            """Determine the specific scenario and return appropriate templates."""
-
-            # Head-on collision scenario (very negative cosine similarity + strict conditions)
+            """Determine scenario type and return appropriate question templates."""
+            # Head-on collision scenario
             if (
-                convergence_factor < -0.95
-                and obj_heading_to_ego > 0.95
-                and ego_heading_to_obj > 0.95
+                convergence_factor < SCENARIO_THRESHOLDS["head_on_convergence"]
+                and obj_heading_to_ego > SCENARIO_THRESHOLDS["head_on_heading"]
+                and ego_heading_to_obj > SCENARIO_THRESHOLDS["head_on_heading"]
             ):
-                scenario = "head_on"
-                templates = [
-                    "Are the ego vehicle and the {} traveling directly towards each other?",
-                    "Is the {} on a direct collision course with the ego vehicle?",
-                    "Are the ego vehicle and the {} moving head-on towards each other?",
-                ]
+                return "head_on", SCENARIO_TEMPLATES["head_on"]
+
             # Object primarily approaching ego
-            elif obj_heading_to_ego > 0.6 and ego_heading_to_obj < 0.3:
-                scenario = "object_approaching"
-                templates = [
-                    "Is the {} moving towards the ego vehicle?",
-                    "Is the {} approaching the ego vehicle?",
-                    "Is the {} heading towards the ego vehicle?",
-                ]
+            elif (
+                obj_heading_to_ego > SCENARIO_THRESHOLDS["strong_heading"]
+                and ego_heading_to_obj < SCENARIO_THRESHOLDS["weak_heading"]
+            ):
+                return "object_approaching", SCENARIO_TEMPLATES["object_approaching"]
+
             # Ego primarily approaching object
-            elif ego_heading_to_obj > 0.6 and obj_heading_to_ego < 0.3:
-                scenario = "ego_approaching"
-                templates = [
-                    "Is the ego vehicle moving towards the {}?",
-                    "Is the ego vehicle approaching the {}?",
-                    "Is the ego vehicle heading towards the {}?",
-                ]
+            elif (
+                ego_heading_to_obj > SCENARIO_THRESHOLDS["strong_heading"]
+                and obj_heading_to_ego < SCENARIO_THRESHOLDS["weak_heading"]
+            ):
+                return "ego_approaching", SCENARIO_TEMPLATES["ego_approaching"]
+
             # General convergence
             else:
-                scenario = "general_convergence"
-                templates = [
-                    "Are the ego vehicle and the {} getting closer to each other?",
-                    "Is the distance between the ego vehicle and the {} decreasing?",
-                    "Are the ego vehicle and the {} converging?",
-                ]
-
-            return scenario, templates
+                return "general_convergence", SCENARIO_TEMPLATES["general_convergence"]
 
         def _get_divergence_templates(
             convergence_factor, obj_heading_to_ego, ego_heading_to_obj
         ):
             """Get templates for diverging scenarios."""
+            # Parallel movement
+            if convergence_factor > SCENARIO_THRESHOLDS["parallel_threshold"]:
+                return "parallel_diverging", SCENARIO_TEMPLATES["parallel_diverging"]
 
-            # Moving in same direction (parallel)
-            if convergence_factor > 0.7:
-                scenario = "parallel_diverging"
-                templates = [
-                    "Are the ego vehicle and the {} moving in the same direction away from each other?",
-                    "Is the {} moving away from the ego vehicle in the same direction?",
-                ]
-            # Object moving away from ego
-            elif obj_heading_to_ego < -0.5:
-                scenario = "object_diverging"
-                templates = [
-                    "Is the {} moving away from the ego vehicle?",
-                    "Is the {} heading away from the ego vehicle?",
-                ]
-            # Ego moving away from object
-            elif ego_heading_to_obj < -0.5:
-                scenario = "ego_diverging"
-                templates = [
-                    "Is the ego vehicle moving away from the {}?",
-                    "Is the ego vehicle heading away from the {}?",
-                ]
+            # Object moving away
+            elif obj_heading_to_ego < SCENARIO_THRESHOLDS["divergence_threshold"]:
+                return "object_diverging", SCENARIO_TEMPLATES["object_diverging"]
+
+            # Ego moving away
+            elif ego_heading_to_obj < SCENARIO_THRESHOLDS["divergence_threshold"]:
+                return "ego_diverging", SCENARIO_TEMPLATES["ego_diverging"]
+
             # General divergence
             else:
-                scenario = "general_divergence"
-                templates = [
-                    "Are the ego vehicle and the {} moving apart?",
-                    "Is the distance between the ego vehicle and the {} increasing?",
-                ]
-
-            return scenario, templates
+                return "general_divergence", SCENARIO_TEMPLATES["general_divergence"]
 
         def _find_pivotal_frame(
             frame_indices,
@@ -1177,47 +1151,52 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
             obj_headings,
             ego_headings,
         ):
-            """Find the most representative frame from the available indices."""
+            """Find the most representative frame based on convergence strength."""
             if len(frame_indices) == 0:
                 return None
 
-            # For positive samples, find frame with strongest convergence signal
             convergence_scores = []
             for idx in frame_indices:
-                # Combine multiple factors for convergence strength
-                distance_factor = max(
-                    0, (50.0 - distances[idx]) / 50.0
-                )  # Closer = higher score
-                speed_factor = min(
-                    abs(relative_speeds[idx]) / 5.0, 1.0
-                )  # Faster = higher score
-                direction_factor = max(
-                    0, -direction_dots[idx]
-                )  # More opposite = higher score
-                heading_factor = max(
-                    obj_headings[idx], ego_headings[idx]
-                )  # Stronger heading = higher score
+                distance_factor = max(0, (50.0 - distances[idx]) / 50.0)
+                speed_factor = min(abs(relative_speeds[idx]) / 5.0, 1.0)
+                direction_factor = max(0, -direction_dots[idx])
+                heading_factor = max(obj_headings[idx], ego_headings[idx])
 
                 total_score = (
                     distance_factor + speed_factor + direction_factor + heading_factor
                 )
                 convergence_scores.append(total_score)
 
-            # Return index with highest convergence score
             best_idx_pos = np.argmax(convergence_scores)
             return frame_indices[best_idx_pos]
 
-        def _handle_sample(
-            frame_idx: int,
-            object_id: str,
-            distance: float,
-            relative_speed: float,
-            convergence_factor: float,
-            obj_heading_to_ego: float,
-            ego_heading_to_obj: float,
-            positive: bool,
+        def _is_object_visible_and_significant(frame_idx, obj_id):
+            """Check if object is visible and meets minimum requirements."""
+            frame = frames[frame_idx]
+            obj = next((obj for obj in frame.objects if obj.id == obj_id), None)
+
+            if (
+                obj is None
+                or obj.num_lidar_points_in_box < MOVEMENT_THRESHOLDS["min_lidar_points"]
+            ):
+                return False
+
+            visible_cameras = [
+                cam for cam in frame.cameras if obj.is_visible_on_camera(frame, cam)
+            ]
+            return bool(visible_cameras)
+
+        def _create_sample(
+            frame_idx,
+            object_id,
+            distance,
+            relative_speed,
+            convergence_factor,
+            obj_heading_to_ego,
+            ego_heading_to_obj,
+            positive,
         ):
-            """Handles generating a question for a positive/negative situation."""
+            """Create a training sample with question and answer."""
             frame = frames[frame_idx]
             obj = next((obj for obj in frame.objects if obj.id == object_id), None)
 
@@ -1228,11 +1207,9 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
                 (cam for cam in frame.cameras if obj.is_visible_on_camera(frame, cam)),
                 None,
             )
-
             if cam is None:
                 return None
 
-            # Get scenario-specific templates
             if positive:
                 scenario, templates = _get_scenario_and_templates(
                     convergence_factor, obj_heading_to_ego, ego_heading_to_obj
@@ -1247,70 +1224,6 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
                 answer_description = f"moving away from {obj.get_object_description()} at {abs(relative_speed):.2f} m/s, currently {distance:.2f} metres away. Scenario: {scenario}"
 
             template = random.choice(templates)
-
-            # ENHANCED DEBUGGING VISUALIZATION #############################
-            img_vis = cv2.imread(cam.image_path)  # type: ignore
-            x1, y1, x2, y2 = obj.get_object_bbox_2d(frame, cam)
-
-            # Color code by scenario
-            scenario_colors = {
-                "head_on": (0, 0, 255),  # Red
-                "object_approaching": (255, 0, 0),  # Blue
-                "ego_approaching": (0, 255, 0),  # Green
-                "general_convergence": (0, 255, 255),  # Yellow
-                "parallel_diverging": (255, 0, 255),  # Magenta
-                "object_diverging": (128, 0, 128),  # Purple
-                "ego_diverging": (0, 128, 128),  # Teal
-                "general_divergence": (128, 128, 128),  # Gray
-            }
-
-            color = scenario_colors.get(scenario, (255, 255, 255))
-            cv2.rectangle(img_vis, (x1, y1), (x2, y2), color, 5)  # type: ignore
-
-            # Add comprehensive debugging info
-            debug_info = [
-                f"Scenario: {scenario}",
-                f"Answer: {answer}",
-                answer_description,
-                f"Cosine similarity: {convergence_factor:.3f}",
-                f"Obj->Ego heading: {obj_heading_to_ego:.3f}",
-                f"Ego->Obj heading: {ego_heading_to_obj:.3f}",
-                f"Distance: {distance:.1f}m",
-                f"Rel speed: {relative_speed:.2f} m/s",
-                f"Camera: {cam.name}",
-                f"Frame: {frame_idx}",
-            ]
-
-            for i, info in enumerate(debug_info):
-                cv2.putText(
-                    img_vis,
-                    info,
-                    (10, 30 + i * 25),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    (0, 0, 255),
-                    2,
-                    cv2.LINE_AA,
-                )
-
-            # Add question at the bottom
-            cv2.putText(
-                img_vis,
-                f"Q: {template.format(obj.get_object_description())}",
-                (10, img_vis.shape[0] - 30),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
-                (0, 255, 0),
-                2,
-                cv2.LINE_AA,
-            )
-
-            filename = f"/home/djamahl/debug_images_ego_approaching/ego_approaching_{scenario}_{frame_idx}_{object_id[:8]}.jpg"
-            print("filename", filename)
-            cv2.imwrite(filename, img_vis)
-            cv2.imwrite("ego_approaching.jpg", img_vis)
-            print(f"Saved debug image: {filename}")
-            # ENHANCED DEBUGGING VISUALIZATION #############################
 
             return {
                 "object_id": object_id,
@@ -1330,190 +1243,95 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
                 "relative_speed": float(relative_speed),
             }
 
-        positive_samples = []
-        negative_samples = []
-
-        for obj_id in trajectories.keys():
-            obj_type = obj_types[obj_id]
-            if obj_type not in ["Vehicle", "Pedestrian", "Cyclist"]:
-                continue
-
-            if not np.any(speeds[obj_id] > 1.0):
-                continue
-
-            if obj_cvat_types[obj_id] is None:
-                continue
-
-            obj_trajectory = trajectories[obj_id]
-
-            # Calculate relative distances over time
+        def _analyze_object_trajectory(obj_id, obj_type, obj_trajectory):
+            """Analyze a single object's trajectory for approach/divergence patterns."""
+            # Calculate relative positions and distances
             relative_positions = obj_trajectory - ego_positions
             distances = np.linalg.norm(relative_positions, axis=1)
 
-            # Use object-specific distance threshold
-            distance_threshold = DEFAULT_CONFIG["distance_threshold"]
-            distance_mask = distances < distance_threshold
-
-            # Calculate relative speed (negative = approaching, positive = moving away)
+            # Calculate relative speed and movement directions
             diff = np.concatenate(
                 [np.zeros((1,), dtype=float), np.diff(distances)], axis=0
             )
             relative_speed = diff / FRAME_DELTA
 
-            # Calculate movement directions for path convergence analysis
             obj_velocity = np.gradient(obj_trajectory, axis=0) / FRAME_DELTA
             ego_velocity = np.gradient(ego_positions, axis=0) / FRAME_DELTA
-
-            # Calculate RELATIVE velocity (this is key!)
             relative_velocity = obj_velocity - ego_velocity
 
-            # Calculate direction vectors (normalized)
+            # Calculate direction vectors
             obj_direction = obj_velocity / (
                 np.linalg.norm(obj_velocity, axis=1, keepdims=True) + 1e-8
             )
             ego_direction = ego_velocity / (
                 np.linalg.norm(ego_velocity, axis=1, keepdims=True) + 1e-8
             )
-
-            # BEST APPROACH: Use relative velocity direction
             relative_direction = relative_velocity / (
                 np.linalg.norm(relative_velocity, axis=1, keepdims=True) + 1e-8
             )
-            # Alternative: Check if relative velocity is pointing toward the other object
+
+            # Calculate convergence metrics
             obj_to_ego_vector = ego_positions - obj_trajectory
             obj_to_ego_normalized = obj_to_ego_vector / (
                 np.linalg.norm(obj_to_ego_vector, axis=1, keepdims=True) + 1e-8
             )
-
-            # Positive means relative velocity is pointing from obj toward ego (converging)
             convergence_factor = np.sum(
                 relative_direction * obj_to_ego_normalized, axis=1
             )
-            # bring back original direction
-            convergence_factor = convergence_factor * -1
 
-            print(f"Convergence factor: {convergence_factor}")
-            print(f"Positive = converging, Negative = diverging")
-
-            # Use this instead of the original convergence_factor
-            paths_converging = convergence_factor < -0.3  # Objects getting closer
-            paths_diverging = convergence_factor > 0.3  # Objects moving apart
-
-            # Calculate vector from object to ego
-            obj_to_ego = ego_positions - obj_trajectory
-            obj_to_ego_normalized = obj_to_ego / (
-                np.linalg.norm(obj_to_ego, axis=1, keepdims=True) + 1e-8
-            )
-
-            # Check if object is moving towards ego (dot product of obj direction with obj->ego vector)
             obj_heading_to_ego = np.sum(obj_direction * obj_to_ego_normalized, axis=1)
-
-            # Check if ego is moving towards object (dot product of ego direction with ego->obj vector)
             ego_to_obj_normalized = -obj_to_ego_normalized
             ego_heading_to_obj = np.sum(ego_direction * ego_to_obj_normalized, axis=1)
 
-            # Use object-specific speed thresholds
+            return {
+                "distances": distances,
+                "relative_speed": relative_speed,
+                "convergence_factor": convergence_factor,
+                "obj_heading_to_ego": obj_heading_to_ego,
+                "ego_heading_to_obj": ego_heading_to_obj,
+            }
+
+        def _find_approach_samples(metrics, obj_type):
+            """Find frames where object is approaching ego."""
             speed_threshold = OBJECT_SPEED_THRESH["TYPE_VEHICLE"]
+            distance_threshold = DEFAULT_CONFIG["distance_threshold"]
 
-            # Enhanced approach detection combining distance and directional analysis
-            distance_approaching = relative_speed <= (-speed_threshold)
+            # Movement conditions - FIXED LOGIC
+            distance_mask = metrics["distances"] < distance_threshold
+            distance_approaching = metrics["relative_speed"] <= (-speed_threshold)
 
-            # Paths are converging if:
-            # 1. Objects are moving in somewhat opposite directions (negative cosine similarity)
-            # 2. OR one object is heading towards the other
+            # Objects are converging if moving toward each other OR one is heading toward the other
             paths_converging = (
-                (convergence_factor < -0.1)  # Moving in opposite-ish directions
-                | (obj_heading_to_ego > 0.3)  # Object heading towards ego
-                | (ego_heading_to_obj > 0.3)  # Ego heading towards object
+                (
+                    metrics["convergence_factor"]
+                    > MOVEMENT_THRESHOLDS["convergence_threshold"]
+                )
+                | (
+                    metrics["obj_heading_to_ego"]
+                    > MOVEMENT_THRESHOLDS["heading_threshold"]
+                )
+                | (
+                    metrics["ego_heading_to_obj"]
+                    > MOVEMENT_THRESHOLDS["heading_threshold"]
+                )
             )
 
             is_approaching = distance_approaching & paths_converging
-
-            # For moving away: distance increasing AND paths diverging
-            distance_moving_away = relative_speed >= speed_threshold
-            paths_diverging = (
-                (convergence_factor > 0.5)  # Moving in similar directions
-                & (obj_heading_to_ego < -0.1)  # Object heading away from ego
-                & (ego_heading_to_obj < -0.1)  # Ego heading away from object
-            )
-
-            is_moving_away = distance_moving_away & paths_diverging
-
-            # Additional filters for better quality samples
-
-            # Object visibility and size requirements
-            def _is_object_visible_and_significant(frame_idx, obj_id):
-                frame = frames[frame_idx]
-                obj = next((obj for obj in frame.objects if obj.id == obj_id), None)
-                if obj is None:
-                    return False
-
-                if obj.num_lidar_points_in_box < 10:
-                    return False
-
-                # Find camera where object is visible
-                visible_cameras = [
-                    cam for cam in frame.cameras if obj.is_visible_on_camera(frame, cam)
-                ]
-                if not visible_cameras:
-                    return False
-
-                return True
-
-            # Distance-based filtering by object type and scenario
-            def _get_reasonable_distance_bounds(obj_type, scenario):
-                if scenario == "head_on":
-                    # Head-on scenarios should be closer and more urgent
-                    if obj_type == "Pedestrian":
-                        return (3.0, 25.0)  # Very close for pedestrians
-                    elif obj_type == "Cyclist":
-                        return (5.0, 35.0)
-                    else:  # Vehicle
-                        return (8.0, 50.0)
-                else:
-                    # Other scenarios can be further
-                    if obj_type == "Pedestrian":
-                        return (2.0, 30.0)
-                    elif obj_type == "Cyclist":
-                        return (3.0, 40.0)
-                    else:  # Vehicle
-                        return (5.0, 60.0)
-
             approach_consistency = (
-                np.cumsum(is_approaching.astype(int)) >= 3
-            )  # Reduced for stricter filtering
-            away_consistency = np.cumsum(is_moving_away.astype(int)) >= 3
-
-            # Filter out very slow movements (likely noise)
-            significant_speed = np.abs(relative_speed) > (
-                speed_threshold * 0.8
-            )  # Increased threshold
-
-            # Get scenario for this object trajectory to determine distance bounds
-            temp_scenarios = []
-            for idx in range(len(distances)):
-                if is_approaching[idx]:
-                    scenario, _ = _get_scenario_and_templates(
-                        convergence_factor[idx],
-                        obj_heading_to_ego[idx],
-                        ego_heading_to_obj[idx],
-                    )
-                    temp_scenarios.append(scenario)
-
-            # Use most common scenario or default
-            most_common_scenario = (
-                max(set(temp_scenarios), key=temp_scenarios.count)
-                if temp_scenarios
-                else "general_convergence"
+                np.cumsum(is_approaching.astype(int))
+                >= MOVEMENT_THRESHOLDS["consistency_frames"]
             )
-            min_dist, max_dist = _get_reasonable_distance_bounds(
-                obj_type, most_common_scenario
+            significant_speed = np.abs(metrics["relative_speed"]) > (
+                speed_threshold * MOVEMENT_THRESHOLDS["speed_multiplier"]
             )
 
-            # Ensure reasonable distance bounds for each object type and scenario
-            reasonable_distance = (distances >= min_dist) & (distances <= max_dist)
+            min_dist, max_dist = DISTANCE_BOUNDS.get(
+                obj_type, DISTANCE_BOUNDS["Vehicle"]
+            )
+            reasonable_distance = (metrics["distances"] >= min_dist) & (
+                metrics["distances"] <= max_dist
+            )
 
-            # Find positive samples (approaching and close)
             positive_mask = (
                 distance_mask
                 & is_approaching
@@ -1521,113 +1339,122 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
                 & significant_speed
                 & reasonable_distance
             )
-            positive_idx = np.where(positive_mask)[0]
+            return np.where(positive_mask)[0]
 
-            # Find negative samples (moving away, any reasonable distance)
+        def _find_divergence_samples(metrics, obj_type):
+            """Find frames where object is moving away from ego."""
+            speed_threshold = OBJECT_SPEED_THRESH["TYPE_VEHICLE"]
+            distance_threshold = DEFAULT_CONFIG["distance_threshold"]
+
+            # Movement conditions - FIXED LOGIC
+            distance_moving_away = metrics["relative_speed"] >= speed_threshold
+
+            # Objects are diverging if moving away from each other AND both heading away
+            paths_diverging = (
+                metrics["convergence_factor"]
+                < MOVEMENT_THRESHOLDS["divergence_threshold"]
+            ) | (  # Actually diverging
+                (
+                    metrics["obj_heading_to_ego"]
+                    < MOVEMENT_THRESHOLDS["divergence_heading_threshold"]
+                )
+                & (
+                    metrics["ego_heading_to_obj"]
+                    < MOVEMENT_THRESHOLDS["divergence_heading_threshold"]
+                )
+            )
+
+            is_moving_away = distance_moving_away & paths_diverging
+            away_consistency = (
+                np.cumsum(is_moving_away.astype(int))
+                >= MOVEMENT_THRESHOLDS["consistency_frames"]
+            )
+            significant_speed = np.abs(metrics["relative_speed"]) > (
+                speed_threshold * MOVEMENT_THRESHOLDS["speed_multiplier"]
+            )
+            reasonable_distance = (
+                metrics["distances"] > MOVEMENT_THRESHOLDS["min_distance"]
+            ) & (metrics["distances"] < distance_threshold * 2)
+
             negative_mask = (
                 is_moving_away
                 & away_consistency
                 & significant_speed
-                & (distances > 2.0)  # Not too close
-                & (distances < distance_threshold * 2)  # Not too far
+                & reasonable_distance
             )
-            negative_idx = np.where(negative_mask)[0]
+            return np.where(negative_mask)[0]
 
-            # Find pivotal frames for each sample type
+        # Main processing loop
+        for obj_id in trajectories.keys():
+            obj_type = obj_types[obj_id]
+            if obj_type not in ["Vehicle", "Pedestrian", "Cyclist"]:
+                continue
+
+            if (
+                not np.any(speeds[obj_id] > MOVEMENT_THRESHOLDS["min_object_speed"])
+                or obj_cvat_types[obj_id] is None
+            ):
+                continue
+
+            obj_trajectory = trajectories[obj_id]
+            metrics = _analyze_object_trajectory(obj_id, obj_type, obj_trajectory)
+
+            # Find positive and negative samples
+            positive_idx = _find_approach_samples(metrics, obj_type)
+            negative_idx = _find_divergence_samples(metrics, obj_type)
+
+            # Find pivotal frames
             pivotal_positive_idx = _find_pivotal_frame(
                 positive_idx,
-                distances,
-                relative_speed,
-                convergence_factor,
-                obj_heading_to_ego,
-                ego_heading_to_obj,
+                metrics["distances"],
+                metrics["relative_speed"],
+                metrics["convergence_factor"],
+                metrics["obj_heading_to_ego"],
+                metrics["ego_heading_to_obj"],
             )
 
             pivotal_negative_idx = _find_pivotal_frame(
                 negative_idx,
-                distances,
-                relative_speed,
-                convergence_factor,
-                obj_heading_to_ego,
-                ego_heading_to_obj,
+                metrics["distances"],
+                metrics["relative_speed"],
+                metrics["convergence_factor"],
+                metrics["obj_heading_to_ego"],
+                metrics["ego_heading_to_obj"],
             )
 
-            # Process pivotal positive sample with visibility check
-            if pivotal_positive_idx is not None:
-                frame_idx = pivotal_positive_idx
-
-                # Check if object is visible and significant enough
-                if not _is_object_visible_and_significant(frame_idx, obj_id):
-                    print(
-                        f"Skipping frame {frame_idx} for object {obj_id} - not visible/significant enough"
-                    )
+            # Process samples
+            for frame_idx, positive in [
+                (pivotal_positive_idx, True),
+                (pivotal_negative_idx, False),
+            ]:
+                if frame_idx is None or not _is_object_visible_and_significant(
+                    frame_idx, obj_id
+                ):
                     continue
 
-                print(f"\n=== POSITIVE SAMPLE (Frame {frame_idx}, Object {obj_id}) ===")
-                print(f"convergence_factor: {convergence_factor[frame_idx]:.3f}")
-                print(f"obj_heading_to_ego: {obj_heading_to_ego[frame_idx]:.3f}")
-                print(f"ego_heading_to_obj: {ego_heading_to_obj[frame_idx]:.3f}")
-                print(f"distance_approaching: {distance_approaching[frame_idx]}")
-                print(f"distance: {distances[frame_idx]:.2f}m")
-                print(f"relative_speed: {relative_speed[frame_idx]:.2f} m/s")
-
-                sample = _handle_sample(
+                sample = _create_sample(
                     frame_idx,
                     obj_id,
-                    distances[frame_idx],
-                    relative_speed[frame_idx],
-                    convergence_factor[frame_idx],
-                    obj_heading_to_ego[frame_idx],
-                    ego_heading_to_obj[frame_idx],
-                    positive=True,
+                    metrics["distances"][frame_idx],
+                    metrics["relative_speed"][frame_idx],
+                    metrics["convergence_factor"][frame_idx],
+                    metrics["obj_heading_to_ego"][frame_idx],
+                    metrics["ego_heading_to_obj"][frame_idx],
+                    positive,
                 )
 
                 if sample is not None:
-                    positive_samples.append(sample)
-
-            # Process pivotal negative sample with visibility check
-            if pivotal_negative_idx is not None:
-                frame_idx = pivotal_negative_idx
-
-                # Check if object is visible and significant enough
-                if not _is_object_visible_and_significant(frame_idx, obj_id):
-                    print(
-                        f"Skipping negative frame {frame_idx} for object {obj_id} - not visible/significant enough"
-                    )
-                    continue
-
-                print(f"\n=== NEGATIVE SAMPLE (Frame {frame_idx}, Object {obj_id}) ===")
-                print(f"convergence_factor: {convergence_factor[frame_idx]:.3f}")
-                print(f"obj_heading_to_ego: {obj_heading_to_ego[frame_idx]:.3f}")
-                print(f"ego_heading_to_obj: {ego_heading_to_obj[frame_idx]:.3f}")
-                print(f"distance: {distances[frame_idx]:.2f}m")
-                print(f"relative_speed: {relative_speed[frame_idx]:.2f} m/s")
-
-                sample = _handle_sample(
-                    frame_idx,
-                    obj_id,
-                    distances[frame_idx],
-                    relative_speed[frame_idx],
-                    convergence_factor[frame_idx],
-                    obj_heading_to_ego[frame_idx],
-                    ego_heading_to_obj[frame_idx],
-                    positive=False,
-                )
-
-                if sample is not None:
-                    negative_samples.append(sample)
+                    if positive:
+                        positive_samples.append(sample)
+                    else:
+                        negative_samples.append(sample)
 
         print(
             f"\nGenerated {len(positive_samples)} positive and {len(negative_samples)} negative samples"
         )
-        for sample in positive_samples:
-            print(f"Positive - {sample['scenario']}: {sample['question']}")
-        for sample in negative_samples:
-            print(f"Negative - {sample['scenario']}: {sample['question']}")
 
-        # Combine neg + pos (balanced)
+        # Combine and balance samples
         results = self._balance_neg_pos(negative_samples, positive_samples)
-
         return choices, results
 
     def generate(self, frames):
@@ -1746,6 +1573,7 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
                     timestamp=frame.timestamp,
                     camera_names=[camera.name for camera in frame.cameras],
                     generator_name=f"{self.__class__.__module__}.{self.__class__.__name__}",
+                    question_name=prompt_func.__name__,
                     data=dict(
                         question_dict=question_dict,
                         best_camera_name=camera.name,
