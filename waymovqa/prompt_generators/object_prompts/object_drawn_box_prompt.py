@@ -93,6 +93,7 @@ class ObjectDrawnBoxPromptGenerator(BasePromptGenerator):
             self._label_prompt,
             self._heading_prompt,
             self._speed_prompt,
+            self._movement_direction_prompt,
         ]
 
     def _color_prompt(self, obj: ObjectInfo, camera: CameraInfo, frame: FrameInfo):
@@ -290,7 +291,8 @@ class ObjectDrawnBoxPromptGenerator(BasePromptGenerator):
 
         # Load and display the image
         try:
-            img = Image.open(BytesIO(base64.b64decode(question_obj.image_base64)))
+            # img = Image.open(BytesIO(base64.b64decode(question_obj.image_base64)))
+            img = Image.open(question_obj.image_path)
             img_array = np.array(img)
             ax.imshow(img_array)
 
@@ -325,6 +327,20 @@ class ObjectDrawnBoxPromptGenerator(BasePromptGenerator):
             verticalalignment="top",
             bbox=dict(boxstyle="round,pad=0.5", facecolor="white", alpha=0.9),
         )
+        
+        if isinstance(question_obj.data, dict) and "bbox" in question_obj.data:
+            x1, y1, x2, y2 = question_obj.data['bbox']
+            width = x2 - x1
+            height = y2 - y1
+            
+            ax.add_patch(patches.Rectangle(
+                xy=(x1, y1), 
+                width=width, 
+                height=height, 
+                fill=False,           # No fill (just border)
+                edgecolor='red',      # Red border to match OpenCV (255,0,0)
+                linewidth=3           # Thick line (OpenCV uses thickness=6)
+            ))
 
         # Display choices and highlight the correct answer
         for idx, choice in enumerate(answer_obj.choices):

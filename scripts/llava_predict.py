@@ -1,7 +1,11 @@
 import sys
 import os
 
+from tqdm import tqdm
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from waymovqa.questions.multi_image_multi_choice import MultipleImageMultipleChoiceQuestion
+import random
 
 from typing import Dict, Tuple, Optional, List
 import torch
@@ -44,109 +48,25 @@ import requests
 from PIL import Image
 from io import BytesIO
 from transformers import TextStreamer
+import cv2
 
 
-def load_image(image_file):
-    if image_file.startswith("http") or image_file.startswith("https"):
-        response = requests.get(image_file)
-        image = Image.open(BytesIO(response.content)).convert("RGB")
-    else:
-        image = Image.open(image_file).convert("RGB")
-    return image
+def load_image(image_path, bbox=None):
+    img_vis = cv2.imread(image_path)
+    img_vis = cv2.cvtColor(img_vis, cv2.COLOR_BGR2RGB)
 
+    if bbox is not None:
+        x1, y1, x2, y2 = bbox
+        cv2.rectangle(img_vis, (x1, y1), (x2, y2), (255, 0, 0), 6)
+        
 
-def generate_responses_for_inputs(text_strs, image_paths, args):
-    # Model
-    disable_torch_init()
-
-    model_name = get_model_name_from_path(args.model_path)
-    tokenizer, model, image_processor, context_len = load_pretrained_model(
-        args.model_path, args.model_base, model_name, args.load_8bit, args.load_4bit
-    )
-
-    if "llama-2" in model_name.lower():
-        conv_mode = "llava_llama_2"
-    elif "v1" in model_name.lower():
-        conv_mode = "llava_v1"
-    elif "mpt" in model_name.lower():
-        conv_mode = "mpt"
-    else:
-        conv_mode = "llava_v0"
-
-    if args.conv_mode is not None and conv_mode != args.conv_mode:
-        print(
-            "[WARNING] the auto inferred conversation mode is {}, while `--conv-mode` is {}, using {}".format(
-                conv_mode, args.conv_mode, args.conv_mode
-            )
-        )
-    else:
-        args.conv_mode = conv_mode
-
-    conv = conv_templates[args.conv_mode].copy()
-    if "mpt" in model_name.lower():
-        roles = ("user", "assistant")
-    else:
-        roles = conv.roles
-
-    responses = []
-
-    for text, image_path in zip(text_strs, image_paths):
-
-        inp = text
-        if image_path is not None:
-            image = load_image(image_path)
-            image_tensor = (
-                image_processor.preprocess(image, return_tensors="pt")["pixel_values"]
-                .half()
-                .cuda()
-            )
-
-            if model.config.mm_use_im_start_end:
-                inp = (
-                    DEFAULT_IM_START_TOKEN
-                    + DEFAULT_IMAGE_TOKEN
-                    + DEFAULT_IM_END_TOKEN
-                    + "\n"
-                    + inp
-                )
-            else:
-                inp = DEFAULT_IMAGE_TOKEN + "\n" + inp
-            conv.append_message(conv.roles[0], inp)
-            image = None
-        else:
-            conv.append_message(conv.roles[0], inp)
-
-        prompt = conv.get_prompt()
-
-        input_ids = (
-            tokenizer_image_token(
-                prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors="pt"
-            )
-            .unsqueeze(0)
-            .cuda()
-        )
-        stop_str = conv.sep if conv.sep_style != SeparatorStyle.TWO else conv.sep2
-        keywords = [stop_str]
-        stopping_criteria = KeywordsStoppingCriteria(keywords, tokenizer, input_ids)
-        streamer = TextStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
-
-        with torch.inference_mode():
-            output_ids = model.generate(
-                input_ids,
-                images=image_tensor,
-                do_sample=True,
-                temperature=0.2,
-                max_new_tokens=1024,
-                streamer=streamer,
-                use_cache=True,
-                stopping_criteria=[stopping_criteria],
-            )
-
-        outputs = tokenizer.decode(output_ids[0, input_ids.shape[1] :]).strip()
-        responses.append(outputs)
-
-    return responses
-
+    # Convert back to PIL Image to match original function
+    pil_img =  Image.fromarray(img_vis)
+        
+    # if bbox is not None:
+    #     pil_img.save("load_image_wbbox.jpg")
+        
+    return pil_img
 
 def run_on_dataset(
     gt_dataset: VQADataset,
@@ -200,14 +120,18 @@ def run_on_dataset(
     # Prepare batches for processing
     batch_text_strs = []
     batch_image_paths = []
+    batch_bboxes = []
     batch_questions = []
     batch_gt_answers = []
 
-    for sample in gt_dataset.samples:
+    for sample in tqdm(gt_dataset.samples, desc="Running LLaVA on samples", total=len(gt_dataset.samples)):
         question = sample.question
         gt_answer = sample.answer
 
-        image_path = str(dataset_path / question.image_path)
+
+        bbox = None
+        if isinstance(question.data, dict) and "bbox" in question.data:
+            bbox = question.data['bbox']
 
         if isinstance(question, SingleImageMultipleChoiceQuestion):
             text = question.question
@@ -216,10 +140,15 @@ def run_on_dataset(
             # )
             # prompt = f"{text}\nChoose the most appropriate answer from the following options:\n{choices_text}"
 
-            prompt = f'{question.question}\nRespond with only the full name of your selection (e.g., "{question.choices[0]}")..'
 
+            print('question.image_path', question.image_path)
+            image_path = str(dataset_path / question.image_path)
+            
+            prompt = f'{question.question}\nRespond with only the full name of your selection (e.g., "{random.choice(question.choices)}")..'
+            print('image_path w/dataset_path', image_path)
             batch_text_strs.append(prompt)
             batch_image_paths.append(image_path)
+            batch_bboxes.append(bbox)
             batch_questions.append(question)
             batch_gt_answers.append(gt_answer)
 
@@ -228,6 +157,7 @@ def run_on_dataset(
             for prompt in question.prompts:
                 batch_text_strs.append(prompt)
                 batch_image_paths.append(image_path)
+                batch_bboxes.append(bbox)
                 batch_questions.append(question)
                 batch_gt_answers.append(gt_answer)
         elif isinstance(question, SingleImageQuestion) and isinstance(
@@ -237,9 +167,60 @@ def run_on_dataset(
 
             batch_text_strs.append(prompt)
             batch_image_paths.append(image_path)
+            batch_bboxes.append(bbox)
+            batch_questions.append(question)
+            batch_gt_answers.append(gt_answer)
+        elif isinstance(question, MultipleImageMultipleChoiceQuestion):
+            best_camera_name = "FRONT"
+            if isinstance(question.data, dict) and "best_camera_name" in question.data:
+                best_camera_name = question.data['best_camera_name']
+                
+            cam_idx = next((i for i, cam_name in enumerate(question.camera_names) if cam_name == best_camera_name), 0)
+            
+            image_path = question.image_paths[cam_idx]
+            print('before image_path')
+            
+            prompt = f'{question.question}\nRespond with only the full name of your selection (e.g., "{random.choice(question.choices)}")..'
+            print('image_path w/dataset_path', image_path)
+
+            batch_text_strs.append(prompt)
+            batch_image_paths.append(image_path)
+            batch_bboxes.append(bbox)
+            batch_questions.append(question)
+            batch_gt_answers.append(gt_answer)
+        elif isinstance(question, MultipleImageQuestion) and isinstance(gt_answer, MultipleChoiceAnswer):
+            best_camera_name = "FRONT"
+            if isinstance(question.data, dict) and "best_camera_name" in question.data:
+                best_camera_name = question.data['best_camera_name']
+                
+            cam_idx = next((i for i, cam_name in enumerate(question.camera_names) if cam_name == best_camera_name), 0)
+            
+            image_path = question.image_paths[cam_idx]
+            print('before image_path')
+            
+            choices = gt_answer.choices
+            
+            prompt = f'{question.question}\nRespond with only the full name of your selection (e.g., "{random.choice(choices)}")..'
+            print('image_path w/dataset_path', image_path)
+            
+            # Get all relevant attributes from the original question
+            attr_names = ['image_path', 'question', 'choices', 'scene_id', 'timestamp', 'camera_name', 'generator_name', 'data', 'question_id', 'question_name']
+            attrs = {name: getattr(question, name) for name in attr_names if hasattr(question, name)}
+            
+            # Override with answer choices
+            attrs['choices'] = gt_answer.choices
+            attrs['image_path'] = image_path
+            attrs['camera_name'] = best_camera_name
+            
+            question = SingleImageMultipleChoiceQuestion(**attrs)
+
+            batch_text_strs.append(prompt)
+            batch_image_paths.append(image_path)
+            batch_bboxes.append(bbox)
             batch_questions.append(question)
             batch_gt_answers.append(gt_answer)
         else:
+            print(question)
             raise TypeError(
                 f"Question type {question.__class__.__name__} not valid for this model"
             )
@@ -249,6 +230,7 @@ def run_on_dataset(
             process_batch(
                 batch_text_strs,
                 batch_image_paths,
+                batch_bboxes,
                 batch_questions,
                 image_processor,
                 model,
@@ -258,6 +240,7 @@ def run_on_dataset(
             )
             batch_text_strs = []
             batch_image_paths = []
+            batch_bboxes = []
             batch_questions = []
             batch_gt_answers = []
 
@@ -266,6 +249,7 @@ def run_on_dataset(
         process_batch(
             batch_text_strs,
             batch_image_paths,
+            batch_bboxes,
             batch_questions,
             image_processor,
             model,
@@ -275,13 +259,14 @@ def run_on_dataset(
         )
 
     # Save results
-    pred_dataset.save_dataset(save_path)
+    pred_dataset.save_dataset(str(save_path))
     return pred_dataset
 
 
 def process_batch(
     batch_text_strs,
     batch_image_paths,
+    batch_bboxes,
     batch_questions,
     image_processor,
     model,
@@ -292,7 +277,7 @@ def process_batch(
     """Helper function to process a batch of inputs using proper batching"""
     # Load all images in batch
     images = [
-        load_image(path) if path is not None else None for path in batch_image_paths
+        load_image(path, bbox) if path is not None else None for path, bbox in zip(batch_image_paths, batch_bboxes)
     ]
     image_tensors = torch.cat(
         [
@@ -373,10 +358,10 @@ def process_batch(
             0
         ].strip()
 
-        print(batch_text_strs[i])
-        print(f"OUTPUT:", outputs)
-        with open(f"raw_output_{i}.txt", "w") as f:
-            f.write(outputs)
+        # print(batch_text_strs[i])
+        # print(f"OUTPUT:", outputs)
+        # with open(f"raw_output_{i}.txt", "w") as f:
+        #     f.write(outputs)
 
         responses.append(outputs)
 
@@ -519,6 +504,7 @@ def main():
 
     save_path = Path(args.save_path)
     dataset_path = Path(args.dataset_path)
+    metrics_save_path = save_path.with_name(f'{save_path.stem}_metrics.json')
 
     llava_args = argparse.Namespace(
         model_path="liuhaotian/llava-v1.5-7b",  # Specify the correct model path
@@ -543,7 +529,23 @@ def main():
     # evaluate?
     metric = MultipleChoiceMetric()
 
-    pprint.pprint(metric.evaluate_dataset(pred_dataset, gt_dataset))
+    metric_results = metric.evaluate_dataset(pred_dataset, gt_dataset)
+    
+    summarised_results = metric.summarise(metric_results)
+    summarised_results['model_name'] = "LLaVA"
+    
+    with open(metrics_save_path, 'w') as f:
+        json.dump(summarised_results, f)
+        
+
+    metric.print_latex_tables(metric_results, 'LLaVA')
+    
+    metric_latex_save_path = Path(metrics_save_path).with_suffix('.tex')
+    metric.save_latex_tables(metric_results, 'LLaVA', metric_latex_save_path)
+        
+    print(f"Inference saved to {save_path}")
+    print(f"Metrics saved to {metrics_save_path}")
+
 
     # predictions = [x.answer for x in pred_dataset.samples]
     # ground_truths = [x.answer for x in gt_dataset.samples]

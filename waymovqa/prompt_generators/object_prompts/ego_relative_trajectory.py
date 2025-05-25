@@ -971,13 +971,7 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
             if sample is not None:
                 processed_samples.append(sample)
 
-        # Separate positive and negative for balancing
-        positive_samples = [s for s in processed_samples if s["positive"]]
-        negative_samples = [s for s in processed_samples if not s["positive"]]
-
-        # Balance and return
-        results = self._balance_neg_pos(negative_samples, positive_samples)
-        return choices, results
+        return choices, processed_samples
 
     def _prompt_faster_than_ego(
         self,
@@ -1090,8 +1084,6 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
         """Generate questions about objects moving towards/away from ego vehicle."""
         results = []
         choices = ["yes", "no"]
-        positive_samples = []
-        negative_samples = []
 
         def _get_scenario_and_templates(
             convergence_factor, obj_heading_to_ego, ego_heading_to_obj
@@ -1444,17 +1436,8 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
                 )
 
                 if sample is not None:
-                    if positive:
-                        positive_samples.append(sample)
-                    else:
-                        negative_samples.append(sample)
+                    results.append(sample)
 
-        print(
-            f"\nGenerated {len(positive_samples)} positive and {len(negative_samples)} negative samples"
-        )
-
-        # Combine and balance samples
-        results = self._balance_neg_pos(negative_samples, positive_samples)
         return choices, results
 
     def generate(self, frames):
@@ -1502,12 +1485,25 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
 
             #
             choices, questions = prompt_out
+            
+
 
             for question_dict in questions:
-                timestamp = question_dict["timestamp"]
-                object_id = question_dict["object_id"]
-                question_txt = question_dict["question"]
-                answer_txt = question_dict["answer"]
+                try:
+                    timestamp = question_dict["timestamp"]
+                    object_id = question_dict["object_id"]
+                    question_txt = question_dict["question"]
+                    answer_txt = question_dict["answer"]
+                except TypeError as e:
+                    print("Typeerror:", e)
+                    print('questions', type(questions))
+                    print('questions', questions)
+                    print('question_dict', type(question_dict))
+                    print('prompt_func', prompt_func)
+                    print('prompt_func.__name__', prompt_func.__name__)
+                    print('question_dict', question_dict)
+                    raise e
+
 
                 frame_idx = next(
                     (idx for idx, time in enumerate(timestamps) if time == timestamp),

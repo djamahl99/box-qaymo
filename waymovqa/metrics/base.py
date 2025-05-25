@@ -23,7 +23,7 @@ class BaseMetric(Generic[T], ABC):
 
     def evaluate_dataset(
         self, pred_dataset: VQADataset, gt_dataset: VQADataset
-    ) -> Dict[str, Any]:
+    ) -> List[Dict]:
         predictions = [x.answer for x in pred_dataset.samples]
         ground_truths = [x.answer for x in gt_dataset.samples]
 
@@ -32,9 +32,10 @@ class BaseMetric(Generic[T], ABC):
         questions1 = [x.question for x in gt_dataset.samples]
         questions = questions0
 
+        assert len(questions0) == len(questions1), f'Datasets should have the same number of questions! pred={len(questions0)} gt={len(questions1)}'
         assert all(
-            [questions0[i] == questions1[i] for i in range(len(questions0))]
-        ) and len(questions0) == len(questions1)
+            [questions0[i].question_id == questions1[i].question_id for i in range(len(questions0))]
+        )
 
         results = []
 
@@ -43,7 +44,7 @@ class BaseMetric(Generic[T], ABC):
             result = self.evaluate(pred, gt, question)
             results.append(result)
 
-        return self.summarise(results)
+        return results
 
     @abstractmethod
     def summarise(self, metric_results: List[Dict]) -> Dict[str, Any]:

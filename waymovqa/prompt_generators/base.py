@@ -15,12 +15,20 @@ from waymovqa.questions import BaseQuestion
 TQ = TypeVar("TQ", bound=BaseAnswer)
 TA = TypeVar("TA", bound=BaseQuestion)
 
-CONFIG = {
-    "max_object_distance": 25.0,  # metres
-    "min_lidar_pts": 25.0,  # metres
-}
 
+DISTANCE_BOUND = 20.0
+MIN_LIDAR_PTS = 10
 
+import enum
+class FailureTypes(enum.IntEnum):
+    NO_MOST_VISIBLE_CAMERA_NAME = 0
+    UNKNOWN_OR_SIGN = 1
+    NOT_VISIBLE = 2
+    NO_MOVEMENT_DIR = 3
+    OBJ_TYPE_NONE = 4
+    TOO_FAR = 5
+    TOO_FEW_PTS = 6
+    NO_CAMERA = 7
 class BasePromptGenerator(Generic[TQ], ABC):
     """Base class for all prompt generators with typed answers."""
 
@@ -63,9 +71,9 @@ class BasePromptGenerator(Generic[TQ], ABC):
 
             for obj in frame.objects:
                 if (
-                    obj.num_lidar_points_in_box >= CONFIG["min_lidar_pts"]
+                    obj.num_lidar_points_in_box >= MIN_LIDAR_PTS
                     and np.linalg.norm(obj.get_centre())
-                    <= CONFIG["max_object_distance"]
+                    <= DISTANCE_BOUND
                     and obj.most_visible_camera_name
                 ):
                     seen_this_frame.append(obj.id)
@@ -79,6 +87,10 @@ class BasePromptGenerator(Generic[TQ], ABC):
     ) -> Dict[str, Tuple[FrameInfo, CameraInfo, ObjectInfo]]:
         """Find the best frame and camera view for each unique object."""
         object_views = {}
+        
+
+            
+        self.failure_counts = [0 for x in FailureTypes]
 
         for frame in frames:
             for obj in frame.objects:
@@ -87,9 +99,19 @@ class BasePromptGenerator(Generic[TQ], ABC):
                     not hasattr(obj, "most_visible_camera_name")
                     or not obj.most_visible_camera_name
                 ):
+                    self.failure_counts[FailureTypes.NO_MOST_VISIBLE_CAMERA_NAME] += 1
                     continue
 
                 if obj.type in ["TYPE_UNKNOWN", "TYPE_SIGN"]:
+                    self.failure_counts[FailureTypes.UNKNOWN_OR_SIGN] += 1
+                    continue
+
+                if np.linalg.norm(obj.get_centre()) > DISTANCE_BOUND:
+                    self.failure_counts[FailureTypes.TOO_FAR] += 1
+                    continue
+
+                if getattr(obj, "num_lidar_points_in_box", 0.0) < MIN_LIDAR_PTS:
+                    self.failure_counts[FailureTypes.TOO_FEW_PTS] += 1
                     continue
 
                 # Get the most visible camera for this object
@@ -102,6 +124,8 @@ class BasePromptGenerator(Generic[TQ], ABC):
                     None,
                 )
                 if not camera:
+                    self.failure_counts[FailureTypes.NO_CAMERA] += 1
+                    
                     continue
 
                 # Calculate visibility score
@@ -109,6 +133,8 @@ class BasePromptGenerator(Generic[TQ], ABC):
 
                 # Skip objects that aren't visible enough
                 if visibility_score <= 0:
+                    self.failure_counts[FailureTypes.NOT_VISIBLE] += 1
+
                     continue
 
                 # Update if this is the best view of this object so far
@@ -117,6 +143,11 @@ class BasePromptGenerator(Generic[TQ], ABC):
                     or visibility_score > object_views[obj.id][3]
                 ):
                     object_views[obj.id] = (frame, camera, obj, visibility_score)
+
+        print('Failure Rates')
+        for fail_type in FailureTypes:
+            print(f'{fail_type.name}', self.failure_counts[fail_type.value])
+        
 
         # Remove the visibility score from the returned dictionary
         return {

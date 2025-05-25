@@ -17,21 +17,19 @@ from waymovqa.data.scene_info import SceneInfo
 from waymovqa.data.object_info import (
     OBJECT_SPEED_CATS,
     WAYMO_TYPE_MAPPING,
+    DifficultyLevelType,
     HeadingType,
     ObjectInfo,
 )
 from waymovqa.data.frame_info import FrameInfo
 from waymovqa.data.camera_info import CameraInfo
 from waymovqa.data.laser_info import LaserInfo
-from waymovqa.prompt_generators.base import BasePromptGenerator
+from waymovqa.prompt_generators.base import DISTANCE_BOUND, MIN_LIDAR_PTS, BasePromptGenerator
 from waymovqa.prompt_generators import register_prompt_generator
 from waymovqa.prompt_generators.templates import *
 from waymovqa.primitives import WAYMO_LABEL_TYPES
 
 from functools import partial
-
-DISTANCE_BOUND = 10.0
-MIN_LIDAR_PTS = 10
 
 OBJECT_SPEED_CATS_QUESTIONS = {
     "TYPE_UNKNOWN": [],
@@ -120,7 +118,13 @@ DIRECTION_STRINGS = {
     "away": "away from the camera",
 }
 
-
+class FailureTypes(enum.IntEnum):
+    UNKNOWN_OR_SIGN = 0
+    NOT_VISIBLE = 1
+    NO_MOVEMENT_DIR = 2
+    OBJ_TYPE_NONE = 3
+    TOO_FAR = 4
+    TOO_FEW_PTS = 5
 @register_prompt_generator
 class ObjectBinaryPromptGenerator(BasePromptGenerator):
     """Generates binary (yes/no) questions about object presence."""
@@ -133,30 +137,44 @@ class ObjectBinaryPromptGenerator(BasePromptGenerator):
             self._object_facing_type,
             self._object_movement_direction_type,
         ]
+        
+        self.failure_counts = [0 for x in FailureTypes]
 
     def check_object(
         self, obj: ObjectInfo, camera: CameraInfo, frame: FrameInfo
     ) -> bool:
         """Check object for distance, num_lidar_pts, visibility etc."""
         if obj.type in ["TYPE_UNKNOWN", "TYPE_SIGN"]:
+            self.failure_counts[FailureTypes.UNKNOWN_OR_SIGN] += 1
             return False
 
         if not obj.is_visible_on_camera(frame, camera):
+            self.failure_counts[FailureTypes.NOT_VISIBLE] += 1
             return False
 
         movement_dir_txt = obj.get_camera_movement_direction(camera, frame)
         if not movement_dir_txt:
+            self.failure_counts[FailureTypes.NO_MOVEMENT_DIR] += 1
             return False
 
         obj_type = obj.type
         if obj_type is None:
+            self.failure_counts[FailureTypes.OBJ_TYPE_NONE] += 1
+            
             return False
 
         if np.linalg.norm(obj.get_centre()) > DISTANCE_BOUND:
+            self.failure_counts[FailureTypes.TOO_FAR] += 1
+
             return False
 
         if getattr(obj, "num_lidar_points_in_box", 0.0) < MIN_LIDAR_PTS:
+            self.failure_counts[FailureTypes.TOO_FEW_PTS] += 1
+
             return False
+        
+        # if obj.detection_difficulty_level == DifficultyLevelType.UNKNOWN:
+        #     return False
 
         return True
 
@@ -175,6 +193,8 @@ class ObjectBinaryPromptGenerator(BasePromptGenerator):
     ) -> str:
         """Format with specific grammar for each movement status, as the template doesn't always make sense."""
         for movement_cat, template in OBJECT_SPEED_CATS_QUESTIONS_MOVING[obj_type]:
+            if movement_status == "stationary":
+                return template
             if movement_cat == movement_status:
                 return template.format(DIRECTION_STRINGS[movement_dir])
 
@@ -192,7 +212,9 @@ class ObjectBinaryPromptGenerator(BasePromptGenerator):
                 continue
 
             movement_status = obj.get_speed_category()
-            key = (obj.type, movement_status.value, movement_status)
+            movement_dir = obj.get_camera_movement_direction(camera, frame)
+            print('obj.type, movement_dir.value, movement_status', obj.type, movement_dir.value, movement_status)
+            key = (obj.type, movement_dir.value, movement_status)
             direction_counts[key] += 1
 
         questions = []
@@ -239,20 +261,20 @@ class ObjectBinaryPromptGenerator(BasePromptGenerator):
             positive_combinations, all_possible_combinations, negative_samples_needed
         )
 
-        # If we can't get enough negatives, reduce positives to maintain ratio
-        if len(negative_combinations) < negative_samples_needed:
-            # Calculate how many positives we should keep
-            max_positives = int(
-                len(negative_combinations)
-                * (1 - self.negative_sample_ratio)
-                / self.negative_sample_ratio
-            )
-            if len(questions) > max_positives:
-                # Randomly sample from positive examples
-                positive_samples = list(zip(questions, answers))
-                selected_positives = random.sample(positive_samples, max_positives)
-                questions, answers = zip(*selected_positives)
-                questions, answers = list(questions), list(answers)
+        # # If we can't get enough negatives, reduce positives to maintain ratio
+        # if len(negative_combinations) < negative_samples_needed:
+        #     # Calculate how many positives we should keep
+        #     max_positives = int(
+        #         len(negative_combinations)
+        #         * (1 - self.negative_sample_ratio)
+        #         / self.negative_sample_ratio
+        #     )
+        #     if len(questions) > max_positives:
+        #         # Randomly sample from positive examples
+        #         positive_samples = list(zip(questions, answers))
+        #         selected_positives = random.sample(positive_samples, max_positives)
+        #         questions, answers = zip(*selected_positives)
+        #         questions, answers = list(questions), list(answers)
 
         # Add the negative samples using the generated combinations
         for obj_type, movement_dir_txt, movement_status in negative_combinations:
@@ -275,7 +297,7 @@ class ObjectBinaryPromptGenerator(BasePromptGenerator):
 
             heading_txt = obj.get_camera_heading_direction(frame, camera).value
             movement_status = obj.get_speed_category()
-            key = (obj_type, heading_txt, movement_status)
+            key = (obj.type, heading_txt, movement_status)
             heading_counts[key] += 1
 
         questions = []
@@ -318,20 +340,20 @@ class ObjectBinaryPromptGenerator(BasePromptGenerator):
             positive_combinations, all_possible_combinations, negative_samples_needed
         )
 
-        # If we can't get enough negatives, reduce positives to maintain ratio
-        if len(negative_combinations) < negative_samples_needed:
-            # Calculate how many positives we should keep
-            max_positives = int(
-                len(negative_combinations)
-                * (1 - self.negative_sample_ratio)
-                / self.negative_sample_ratio
-            )
-            if len(questions) > max_positives:
-                # Randomly sample from positive examples
-                positive_samples = list(zip(questions, answers))
-                selected_positives = random.sample(positive_samples, max_positives)
-                questions, answers = zip(*selected_positives)
-                questions, answers = list(questions), list(answers)
+        # # If we can't get enough negatives, reduce positives to maintain ratio
+        # if len(negative_combinations) < negative_samples_needed:
+        #     # Calculate how many positives we should keep
+        #     max_positives = int(
+        #         len(negative_combinations)
+        #         * (1 - self.negative_sample_ratio)
+        #         / self.negative_sample_ratio
+        #     )
+        #     if len(questions) > max_positives:
+        #         # Randomly sample from positive examples
+        #         positive_samples = list(zip(questions, answers))
+        #         selected_positives = random.sample(positive_samples, max_positives)
+        #         questions, answers = zip(*selected_positives)
+        #         questions, answers = list(questions), list(answers)
 
         # Add the negative samples using the generated combinations
         for obj_type, heading, movement_status in negative_combinations:
@@ -383,6 +405,11 @@ class ObjectBinaryPromptGenerator(BasePromptGenerator):
                         choices=["yes", "no"], answer=answer_text
                     )
                     samples.append((question, answer))
+
+        print('Failure Rates')
+        for fail_type in FailureTypes:
+            print(f'{fail_type.name}', self.failure_counts[fail_type.value])
+        
 
         return samples
 

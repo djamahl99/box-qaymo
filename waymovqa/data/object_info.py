@@ -23,7 +23,7 @@ WAYMO_TYPE_MAPPING = {
 
 OBJECT_SPEED_THRESH = {
     "TYPE_UNKNOWN": float("inf"),
-    "TYPE_VEHICLE": 5.0,  # metres/second
+    "TYPE_VEHICLE": 2.8,  # metres/second
     "TYPE_PEDESTRIAN": 1.1,  # walking speed
     "TYPE_SIGN": float("inf"),  # shouldn't move
     "TYPE_CYCLIST": 1.5,  # a bit faster than say walking
@@ -48,10 +48,16 @@ OBJECT_SPEED_CATS = {
     "TYPE_CYCLIST": [
         ("stationary", 0.0, 1.5),  # up to a bit faster than walking speed
         ("slow moving", 1.5, 8.33),  # up to 30 km/h
-        ("fast ", 8.33, float("inf")),  # any faster than 30km/h
+        ("fast", 8.33, float("inf")),  # any faster than 30km/h
     ],
 }
 
+# DifficultyLevelType from https://github.com/waymo-research/waymo-open-dataset/blob/master/src/waymo_open_dataset/v2/perception/box.py
+class DifficultyLevelType(Enum):
+    """The difficulty level types. The higher, the harder."""
+    UNKNOWN = 0
+    LEVEL_1 = 1
+    LEVEL_2 = 2
 
 class HeadingType(str, Enum):
     TOWARDS = "towards"
@@ -386,7 +392,7 @@ class ObjectInfo(DataObject):
             return "behind the ego vehicle"
 
     def is_visible_on_camera(self, frame: "FrameInfo", camera: "CameraInfo") -> bool:
-        """Generates a description for a specific object on a specific camera."""
+        """Check if all corners of the projected object lie on the camera."""
         uvdok = self.project_to_image(frame, camera)
 
         # Extract projected coordinates
@@ -540,7 +546,7 @@ class ObjectInfo(DataObject):
     ) -> MovementType:
         """Returns heading choice -> returns one of 'towards', 'away', 'left', 'right'"""
 
-        if self.is_object_moving():
+        if not self.is_object_moving():
             return MovementType.NOT_MOVING
 
         obj_centre = self.get_centre().reshape(1, 3)
@@ -641,7 +647,7 @@ class ObjectInfo(DataObject):
             if (speed >= lwbnd) and (speed <= upbnd):
                 return speed_cat
 
-        return "Stationary"
+        return "stationary"
 
     def __repr__(self) -> str:
         text = f"Object #{self.id} timestamp={self.timestamp}"
