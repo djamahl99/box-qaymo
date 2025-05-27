@@ -419,6 +419,8 @@ class ObjectBinaryPromptGenerator(BasePromptGenerator):
         answer_obj: MultipleChoiceAnswer,
         save_path,
         frames,
+        pred_answer_obj: Optional[MultipleChoiceAnswer] = None,
+        extra_text="",
         figsize=(12, 8),
         text_fontsize=12,
         title_fontsize=14,
@@ -472,14 +474,16 @@ class ObjectBinaryPromptGenerator(BasePromptGenerator):
 
         # Extract answer info
         answer_text = answer_obj.answer.lower()
-
-        # Set colors based on answer
-        if answer_text == "yes":
-            answer_color = "green"
-            answer_symbol = "✓"
-        else:
-            answer_color = "red"
-            answer_symbol = "✗"
+        pred_answer_display = ""
+        if pred_answer_obj is not None:
+            if pred_answer_obj.get_answer_text().lower() == answer_obj.answer.lower():
+                answer_symbol = "✓"
+                answer_color = "green"
+            else:
+                answer_symbol = "✗"
+                answer_color = "red"
+                
+            pred_answer_display = f"Prediction: {pred_answer_obj.get_answer_text().upper()} {answer_symbol}"
 
         # Add text overlay for question
         question_text = textwrap.fill(question_obj.question, width=60)
@@ -494,7 +498,7 @@ class ObjectBinaryPromptGenerator(BasePromptGenerator):
         )
 
         # Add answer overlay
-        answer_display = f"A: {answer_text.upper()} {answer_symbol}"
+        answer_display = f"Answer: {answer_text.title()}" 
         ax.text(
             0.02,
             0.02,
@@ -505,11 +509,27 @@ class ObjectBinaryPromptGenerator(BasePromptGenerator):
             verticalalignment="bottom",
             bbox=dict(
                 boxstyle="round,pad=0.5",
-                facecolor=answer_color,
+                facecolor="white",
                 alpha=0.8,
-                edgecolor=answer_color,
+                edgecolor="white",
             ),
         )
+        if pred_answer_display:
+            ax.text(
+                0.02,
+                0.1,
+                pred_answer_display,
+                transform=ax.transAxes,
+                fontsize=text_fontsize + 2,
+                weight="bold",
+                verticalalignment="bottom",
+                bbox=dict(
+                    boxstyle="round,pad=0.5",
+                    facecolor=answer_color,
+                    alpha=0.8,
+                    edgecolor=answer_color,
+                ),
+            )
 
         # Title
         camera_name = getattr(question_obj, "camera_name", "Unknown")

@@ -20,6 +20,7 @@ class QuestionType(str, Enum):
     SINGLE_BASE64_IMAGE_MULTI_CHOICE = "single_base64_image_multi_choice"
     MULTI_IMAGE_LIDAR = "multi_image_lidar"
     MULTI_IMAGE = "multi_image"
+    MULTI_FRAME_MULTI_CHOICE = "multi_frame_multi_choice"
     MULTI_IMAGE_SINGLE_OBJECT = "multi_image_single_object"
 
 

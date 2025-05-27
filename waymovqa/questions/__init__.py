@@ -11,6 +11,7 @@ from .single_image_multi_choice import (
 )
 from .multi_image import MultipleImageQuestion
 from .multi_image_single_object import MultipleImageSingleObject
+from .multi_frame_multi_choice import MultipleFrameMultipleChoiceQuestion
 
 QUESTION_TYPE_REGISTRY = {
     QuestionType.SINGLE_IMAGE: SingleImageQuestion,
@@ -19,6 +20,7 @@ QUESTION_TYPE_REGISTRY = {
     QuestionType.SINGLE_IMAGE_MULTI_CHOICE: SingleImageMultipleChoiceQuestion,
     QuestionType.SINGLE_BASE64_IMAGE_MULTI_CHOICE: SingleBase64ImageMultipleChoiceQuestion,
     # QuestionType.MULTI_IMAGE_LIDAR: ,
+    QuestionType.MULTI_FRAME_MULTI_CHOICE: MultipleFrameMultipleChoiceQuestion,
     QuestionType.MULTI_IMAGE: MultipleImageQuestion,
     QuestionType.MULTI_IMAGE_SINGLE_OBJECT: MultipleImageSingleObject,
 }

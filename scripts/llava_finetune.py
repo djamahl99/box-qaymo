@@ -16,11 +16,22 @@ import torch.optim as optim
 from torch.nn.utils import clip_grad_norm_
 import cv2
 
+import torch
+import torch.optim as optim
+from torch.utils.data import DataLoader
+from torch.nn.utils import clip_grad_norm_
+from pathlib import Path
+import random
+from tqdm import tqdm
+from peft import LoraConfig, get_peft_model, TaskType
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from waymovqa.data.vqa_dataset import VQADataset
 from waymovqa.questions import *
 from waymovqa.answers.multiple_choice import MultipleChoiceAnswer
+from waymovqa.questions.multi_image_multi_choice import MultipleImageMultipleChoiceQuestion
+from waymovqa.questions.multi_image import MultipleImageQuestion
 
 from llava.constants import (
     IMAGE_TOKEN_INDEX,
@@ -33,27 +44,6 @@ from llava.conversation import conv_templates, SeparatorStyle
 from llava.model.builder import load_pretrained_model
 from llava.utils import disable_torch_init
 from llava.mm_utils import tokenizer_image_token
-
-
-@dataclass
-class TrainingConfig:
-    """Training configuration"""
-    dataset_path: str
-    vqa_path: str
-    output_dir: str = "./llava_finetuned"
-    model_name: str = "liuhaotian/llava-v1.5-7b"
-    train_split: float = 0.8
-    batch_size: int = 2
-    learning_rate: float = 2e-5
-    num_epochs: int = 3
-    max_grad_norm: float = 1.0
-    save_steps: int = 500
-    eval_steps: int = 500
-    warmup_steps: int = 100
-    conv_mode: str = "llava_v1"
-    load_4bit: bool = False  # Set to False to avoid quantization issues
-    device: str = "cuda" if torch.cuda.is_available() else "cpu"
-
 
 class VQATrainingDataset(Dataset):
     """Simplified dataset for training LLaVA on VQA tasks"""
@@ -74,12 +64,18 @@ class VQATrainingDataset(Dataset):
         self.conv_template = conv_templates[conv_mode]
         self.max_length = max_length
         
+        self.camera_images_path = self.dataset_path / "camera_images"
+        
     def __len__(self):
         return len(self.vqa_dataset.samples)
     
     def load_image(self, image_path, bbox=None):
         """Load and process image, optionally with bounding box"""
-        img_vis = cv2.imread(str(self.dataset_path / image_path))
+        image_path = self.camera_images_path / Path(image_path).name
+        print('image_path', image_path)
+        if not image_path.exists():
+            exit()
+        img_vis = cv2.imread(str(image_path))
         img_vis = cv2.cvtColor(img_vis, cv2.COLOR_BGR2RGB)
 
         if bbox is not None:
@@ -255,8 +251,10 @@ def collate_fn(batch):
     }
 
 
-def train_model(config: TrainingConfig):
-    """Main training function"""
+
+
+def train_model_lora(config: TrainingConfig):
+    """Main LoRA training function"""
     
     # Load dataset
     print("Loading VQA dataset...")
@@ -294,14 +292,39 @@ def train_model(config: TrainingConfig):
     )
     
     # Move model to device
-    model = model.to(config.device)
+    model_dtype = torch.float16
+    model = model.to(config.device, model_dtype)
+    
+    # Configure LoRA
+    print("Setting up LoRA configuration...")
+    
+    # LoRA configuration
+    lora_config = LoraConfig(
+        task_type=TaskType.CAUSAL_LM,  # For language modeling tasks
+        r=getattr(config, 'lora_r', 16),  # Rank of adaptation
+        lora_alpha=getattr(config, 'lora_alpha', 32),  # LoRA scaling parameter
+        lora_dropout=getattr(config, 'lora_dropout', 0.1),  # LoRA dropout
+        target_modules=getattr(config, 'lora_target_modules', [
+            # Target the language model's attention and MLP layers
+            "q_proj", "v_proj", "k_proj", "o_proj",  # Attention projections
+            "gate_proj", "up_proj", "down_proj"      # MLP projections
+        ]),
+        bias="none",  # Don't adapt bias parameters
+        modules_to_save=getattr(config, 'modules_to_save', [
+            # Save these modules completely (often projection layers)
+            "lm_head", "embed_tokens"
+        ])
+    )
+    
+    # Apply LoRA to the model
+    print("Applying LoRA to model...")
+    model = get_peft_model(model, lora_config)
+    
+    # Print trainable parameters info
+    model.print_trainable_parameters()
     
     # Enable training mode
     model.train()
-    
-    # Enable gradient computation for vision tower and language model
-    for param in model.parameters():
-        param.requires_grad = True
     
     # Create datasets
     print("Creating training datasets...")
@@ -338,8 +361,16 @@ def train_model(config: TrainingConfig):
         num_workers=0
     )
     
-    # Setup optimizer
-    optimizer = optim.AdamW(model.parameters(), lr=config.learning_rate, weight_decay=0.01)
+    # Setup optimizer - only optimize trainable parameters
+    print("Setting up optimizer...")
+    trainable_params = [p for p in model.parameters() if p.requires_grad]
+    print(f"Number of trainable parameters: {sum(p.numel() for p in trainable_params):,}")
+    
+    optimizer = optim.AdamW(
+        trainable_params, 
+        lr=getattr(config, 'lora_learning_rate', config.learning_rate), 
+        weight_decay=0.01
+    )
     
     # Setup learning rate scheduler
     total_steps = len(train_loader) * config.num_epochs
@@ -354,7 +385,7 @@ def train_model(config: TrainingConfig):
     )
     
     # Training loop
-    print("Starting training...")
+    print("Starting LoRA training...")
     global_step = 0
     
     for epoch in range(config.num_epochs):
@@ -369,12 +400,12 @@ def train_model(config: TrainingConfig):
                 
             # Move batch to device
             input_ids = batch["input_ids"].to(config.device)
-            labels = batch["labels"].to(config.device)
-            attention_mask = batch["attention_mask"].to(config.device)
-            images = batch["images"].to(config.device)
-            
+            labels = batch["labels"].to(config.device)  # Keep labels as integers
+            attention_mask = batch["attention_mask"].to(config.device, model_dtype)
+            images = batch["images"].to(config.device, model_dtype)
+
             # Forward pass
-            try:
+            with torch.autocast('cuda'):
                 outputs = model(
                     input_ids=input_ids,
                     attention_mask=attention_mask,
@@ -382,16 +413,13 @@ def train_model(config: TrainingConfig):
                     images=images
                 )
                 loss = outputs.loss
-            except Exception as e:
-                print(f"Error in forward pass: {e}")
-                continue
             
             # Backward pass
             optimizer.zero_grad()
             loss.backward()
             
             # Gradient clipping
-            clip_grad_norm_(model.parameters(), config.max_grad_norm)
+            clip_grad_norm_(trainable_params, config.max_grad_norm)
             
             optimizer.step()
             scheduler.step()
@@ -405,37 +433,140 @@ def train_model(config: TrainingConfig):
                 lr = scheduler.get_last_lr()[0]
                 print(f"Step {global_step}, Loss: {loss.item():.4f}, Avg Loss: {avg_loss:.4f}, LR: {lr:.2e}")
             
-            # Save checkpoint
+            # Save LoRA checkpoint
             if global_step % config.save_steps == 0:
-                save_path = Path(config.output_dir) / f"checkpoint-{global_step}"
+                save_path = Path(config.output_dir) / f"lora-checkpoint-{global_step}"
                 save_path.mkdir(parents=True, exist_ok=True)
                 
+                # Save LoRA weights
+                model.save_pretrained(save_path)
+                
+                # Save training state
                 torch.save({
-                    'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(),
                     'scheduler_state_dict': scheduler.state_dict(),
                     'global_step': global_step,
-                    'config': config
-                }, save_path / "pytorch_model.bin")
+                    'config': config,
+                    'lora_config': lora_config
+                }, save_path / "training_state.bin")
                 
-                print(f"Checkpoint saved to {save_path}")
+                print(f"LoRA checkpoint saved to {save_path}")
+        
+        # Optional: Run evaluation
+        if hasattr(config, 'eval_steps') and (epoch + 1) % config.eval_steps == 0:
+            print("Running evaluation...")
+            eval_loss = evaluate_model(model, eval_loader, config)
+            print(f"Evaluation loss: {eval_loss:.4f}")
+            model.train()  # Back to training mode
     
-    # Save final model
-    final_save_path = Path(config.output_dir) / "final_model"
+    # Save final LoRA model
+    final_save_path = Path(config.output_dir) / "final_lora_model"
     final_save_path.mkdir(parents=True, exist_ok=True)
     
-    torch.save({
-        'model_state_dict': model.state_dict(),
-        'config': config
-    }, final_save_path / "pytorch_model.bin")
+    # Save LoRA adapter weights
+    model.save_pretrained(final_save_path)
     
-    # Also save the tokenizer
+    # Save tokenizer and config
     tokenizer.save_pretrained(final_save_path)
     
-    print(f"Training completed! Final model saved to {final_save_path}")
+    # Save complete training info
+    torch.save({
+        'config': config,
+        'lora_config': lora_config,
+        'global_step': global_step
+    }, final_save_path / "training_info.bin")
+    
+    print(f"LoRA training completed! Final model saved to {final_save_path}")
+    print(f"To use the model, load the base model and then load the LoRA weights from {final_save_path}")
     
     return model
 
+def evaluate_model(model, eval_loader, config):
+    """Evaluate the model on validation set"""
+    model.eval()
+    total_loss = 0
+    num_batches = 0
+    
+    with torch.no_grad():
+        for batch in tqdm(eval_loader, desc="Evaluating"):
+            if batch is None:
+                continue
+                
+            input_ids = batch["input_ids"].to(config.device)
+            labels = batch["labels"].to(config.device)
+            attention_mask = batch["attention_mask"].to(config.device, torch.float16)
+            images = batch["images"].to(config.device, torch.float16)
+            
+            with torch.autocast('cuda'):
+                outputs = model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    labels=labels,
+                    images=images
+                )
+                loss = outputs.loss
+            
+            total_loss += loss.item()
+            num_batches += 1
+    
+    return total_loss / num_batches if num_batches > 0 else 0
+
+def load_lora_model(base_model_path, lora_adapter_path, device='cuda'):
+    """Helper function to load a trained LoRA model"""
+    from peft import PeftModel
+    
+    # Load base model
+    tokenizer, model, image_processor, context_len = load_pretrained_model(
+        base_model_path, None, "llava-v1.5-7b", False, False
+    )
+    
+    # Load LoRA adapter
+    model = PeftModel.from_pretrained(model, lora_adapter_path)
+    model = model.to(device)
+    
+    return tokenizer, model, image_processor, context_len
+
+# Example usage and configuration
+class LoRATrainingConfig:
+    """Extended config class for LoRA training"""
+    def __init__(self):
+        # Base training config
+        self.vqa_path = "path/to/vqa/dataset"
+        self.dataset_path = "path/to/images"
+        self.output_dir = "output/lora_training"
+        self.model_name = "liuhaotian/llava-v1.5-7b"
+        
+        # Training parameters
+        self.batch_size = 4
+        self.learning_rate = 2e-4
+        self.num_epochs = 3
+        self.warmup_steps = 100
+        self.save_steps = 500
+        self.max_grad_norm = 1.0
+        self.train_split = 0.9
+        self.conv_mode = "llava_v1"
+        
+        # Device settings
+        self.device = "cuda"
+        self.load_4bit = True  # Use 4-bit quantization to save memory
+        
+        # LoRA specific parameters
+        self.lora_r = 16  # Rank of adaptation
+        self.lora_alpha = 32  # LoRA scaling parameter
+        self.lora_dropout = 0.1  # LoRA dropout
+        self.lora_learning_rate = 2e-4  # Can be different from base LR
+        
+        # Target modules for LoRA (adjust based on your model architecture)
+        self.lora_target_modules = [
+            "q_proj", "v_proj", "k_proj", "o_proj",  # Attention layers
+            "gate_proj", "up_proj", "down_proj"      # MLP layers
+        ]
+        
+        # Modules to save completely (not as LoRA)
+        self.modules_to_save = ["lm_head", "embed_tokens"]
+        
+        # Evaluation
+        self.eval_steps = 1  # Evaluate every N epochs
 
 def main():
     import argparse
@@ -454,7 +585,7 @@ def main():
     
     args = parser.parse_args()
     
-    config = TrainingConfig(
+    config = LoRATrainingConfig(
         dataset_path=args.dataset_path,
         vqa_path=args.vqa_path,
         output_dir=args.output_dir,
@@ -467,7 +598,7 @@ def main():
     )
     
     # Train model
-    model = train_model(config)
+    model = train_model_lora(config)
     
     print("Training completed!")
 

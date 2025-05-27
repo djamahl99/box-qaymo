@@ -257,6 +257,8 @@ class ObjectDrawnBoxPromptGenerator(BasePromptGenerator):
         answer_obj: MultipleChoiceAnswer,
         save_path,
         frames,
+        pred_answer_obj: Optional[MultipleChoiceAnswer] = None,
+        extra_text="",
         figsize=(12, 8),
         box_color="green",
         text_fontsize=12,
@@ -344,13 +346,25 @@ class ObjectDrawnBoxPromptGenerator(BasePromptGenerator):
 
         # Display choices and highlight the correct answer
         for idx, choice in enumerate(answer_obj.choices):
-            if choice == answer_obj.answer:
+            # correct and pred
+            if choice == answer_obj.answer and pred_answer_obj is not None and choice == pred_answer_obj.get_answer_text():
                 choice_color = "lightgreen"
                 choice_text = f"✓ {choice} (CORRECT)"
                 text_color = "darkgreen"
+            # correct
+            elif choice == answer_obj.answer:
+                choice_color = "lightgreen"
+                choice_text = f"{choice}"
+                text_color = "darkgreen"
+            # incorrect and pred
+            elif pred_answer_obj is not None and choice == pred_answer_obj.get_answer_text():
+                choice_color = "lightcoral"
+                choice_text = f"✗ {choice} (INCORRECT)"
+                text_color = "darkred"
+            # incorrect
             else:
                 choice_color = "lightcoral"
-                choice_text = f"✗ {choice}"
+                choice_text = f"{choice}"
                 text_color = "darkred"
 
             ax.text(

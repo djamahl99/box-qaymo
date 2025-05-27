@@ -199,6 +199,7 @@ class BasePromptGenerator(Generic[TQ], ABC):
         answer_obj: BaseAnswer,
         save_path,
         frames,
+        pred_answer_obj: Optional[BaseAnswer] = None,
         figsize=(12, 8),
         box_color="green",
         text_fontsize=12,

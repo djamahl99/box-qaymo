@@ -22,6 +22,7 @@ import re
 from waymovqa.data.vqa_dataset import VQADataset
 from waymovqa.questions import *
 from waymovqa.answers.multiple_choice import MultipleChoiceAnswer
+from waymovqa.questions.multi_frame_multi_choice import MultipleFrameMultipleChoiceQuestion
 from waymovqa.answers.raw_text import RawTextAnswer
 from waymovqa.metrics.multiple_choice import MultipleChoiceMetric
 from waymovqa.questions.single_image import SingleImageQuestion
@@ -64,7 +65,6 @@ import cv2
 
 def load_image(image_path, bbox=None, draw_bbox=True):
     if not draw_bbox:
-        print("not draw_bbox")
         return Image.open(image_path)
 
     img_vis = cv2.imread(image_path)
@@ -110,6 +110,10 @@ def get_prompt(question: BaseQuestion, gt_answer: BaseAnswer) -> str:
 
         choices = gt_answer.choices
         extra_text = f"Focus on the {best_camera_name.lower().replace('_', '')} camera."
+    elif isinstance(question, MultipleFrameMultipleChoiceQuestion) and isinstance(
+        gt_answer, MultipleChoiceAnswer
+    ):
+        choices = gt_answer.choices
     else:
         raise TypeError(f"question->{type(question)} answer->{type(gt_answer)}")
 
@@ -180,12 +184,6 @@ def run_on_dataset(
 
     pred_dataset = VQADataset(tag=f"llava_{save_path.stem}")
 
-    # Prepare batches for processing
-    batch_text_strs = []
-    batch_image_paths = []
-    batch_bboxes = []
-    batch_questions = []
-    batch_gt_answers = []
 
     for sample in tqdm(
         gt_dataset.samples,
@@ -195,146 +193,24 @@ def run_on_dataset(
         question = sample.question
         gt_answer = sample.answer
 
-        bbox = None
-        if isinstance(question.data, dict) and "bbox" in question.data:
-            bbox = question.data["bbox"]
+        image_paths = []
+        bboxes = []
 
-        if isinstance(question, SingleImageMultipleChoiceQuestion):
-            image_path = str(dataset_path / question.image_path)
-
-            prompt = get_prompt(question, gt_answer)
-            batch_text_strs.append(prompt)
-            batch_image_paths.append(image_path)
-            batch_bboxes.append(bbox)
-            batch_questions.append(question)
-            batch_gt_answers.append(gt_answer)
-
-        elif isinstance(question, SingleImageMultiplePromptQuestion):
-            # For multiple prompt questions, add each prompt separately
-            for prompt in question.prompts:
-                batch_text_strs.append(prompt)
-                batch_image_paths.append(image_path)
-                batch_bboxes.append(bbox)
-                batch_questions.append(question)
-                batch_gt_answers.append(gt_answer)
-        elif isinstance(question, SingleImageQuestion) and isinstance(
-            gt_answer, MultipleChoiceAnswer
-        ):
+        if isinstance(question, MultipleFrameMultipleChoiceQuestion):
             prompt = get_prompt(question, gt_answer)
 
-            batch_text_strs.append(prompt)
-            batch_image_paths.append(image_path)
-            batch_bboxes.append(bbox)
-            batch_questions.append(question)
-            batch_gt_answers.append(gt_answer)
-        elif isinstance(question, MultipleImageMultipleChoiceQuestion):
-            best_camera_name = "FRONT"
-            if isinstance(question.data, dict) and "best_camera_name" in question.data:
-                best_camera_name = question.data["best_camera_name"]
-
-            cam_idx = next(
-                (
-                    i
-                    for i, cam_name in enumerate(question.camera_names)
-                    if cam_name == best_camera_name
-                ),
-                0,
-            )
-
-            image_path = question.image_paths[cam_idx]
-
-            prompt = get_prompt(question, gt_answer) # type: ignore
-
-            batch_text_strs.append(prompt)
-            batch_image_paths.append(image_path)
-            batch_bboxes.append(bbox)
-            batch_questions.append(question)
-            batch_gt_answers.append(gt_answer)
-        elif isinstance(question, MultipleImageQuestion) and isinstance(
-            gt_answer, MultipleChoiceAnswer
-        ):
-            best_camera_name = "FRONT"
-            if isinstance(question.data, dict) and "best_camera_name" in question.data:
-                best_camera_name = question.data["best_camera_name"]
-
-            cam_idx = next(
-                (
-                    i
-                    for i, cam_name in enumerate(question.camera_names)
-                    if cam_name == best_camera_name
-                ),
-                0,
-            )
-
-            image_path = question.image_paths[cam_idx]
-
-            choices = gt_answer.choices
-
-            prompt = get_prompt(question, gt_answer)
-
-            # Get all relevant attributes from the original question
-            attr_names = [
-                "image_path",
-                "question",
-                "choices",
-                "scene_id",
-                "timestamp",
-                "camera_name",
-                "generator_name",
-                "data",
-                "question_id",
-                "question_name",
-            ]
-            attrs = {
-                name: getattr(question, name)
-                for name in attr_names
-                if hasattr(question, name)
-            }
-
-            # Override with answer choices
-            attrs["choices"] = gt_answer.choices
-            attrs["image_path"] = image_path
-            attrs["camera_name"] = best_camera_name
-
-            question = SingleImageMultipleChoiceQuestion(**attrs)
-
-            batch_text_strs.append(prompt)
-            batch_image_paths.append(image_path)
-            batch_bboxes.append(bbox)
-            batch_questions.append(question)
-            batch_gt_answers.append(gt_answer)
+            image_paths = [str(dataset_path / question.previous_image_path), str(dataset_path / question.current_image_path)]
+            bboxes = [question.previous_bbox, question.current_bbox]
         else:
             raise TypeError(
                 f"Question type {question.__class__.__name__} not valid for this model"
             )
 
-        # Process batch if it reaches the specified size
-        if len(batch_text_strs) >= batch_size:
-            process_batch(
-                batch_text_strs,
-                batch_image_paths,
-                batch_bboxes,
-                batch_questions,
-                image_processor,
-                model,
-                conv_templates[args.conv_mode],
-                tokenizer,
-                pred_dataset,
-                draw_bbox,
-            )
-            batch_text_strs = []
-            batch_image_paths = []
-            batch_bboxes = []
-            batch_questions = []
-            batch_gt_answers = []
-
-    # Process any remaining samples
-    if batch_text_strs:
-        process_batch(
-            batch_text_strs,
-            batch_image_paths,
-            batch_bboxes,
-            batch_questions,
+        process_multiframe_question(
+            prompt,
+            image_paths,
+            bboxes,
+            question,
             image_processor,
             model,
             conv_templates[args.conv_mode],
@@ -342,158 +218,114 @@ def run_on_dataset(
             pred_dataset,
             draw_bbox,
         )
+
     # Save results
     pred_dataset.save_dataset(str(save_path))
     return pred_dataset
 
 
-def process_batch(
-    batch_text_strs,
-    batch_image_paths,
-    batch_bboxes,
-    batch_questions,
+def process_multiframe_question(
+    text,
+    image_paths,
+    bboxes,     
+    question,
     image_processor,
     model,
-    conv_template,  # Changed from conv to conv_template
+    conv_template,
     tokenizer,
     pred_dataset,
-    draw_bbox=True,
+    draw_bbox=True
 ):
-    """Helper function to process a batch of inputs using proper batching"""
-    # Load all images in batch
-    images = [
-        load_image(path, bbox, draw_bbox) if path is not None else None
-        for path, bbox in zip(batch_image_paths, batch_bboxes)
-    ]
-    image_tensors = torch.cat(
-        [
+    """Helper function to process a batch of inputs with support for multiple images per input"""
+    
+    # Load all images for all inputs
+    all_images = []
+    image_start_indices = []  # Track where each input's images start in the tensor
+
+    # Load all images for this input
+    for path, bbox in zip(image_paths, bboxes):
+        if path is not None:
+            img = load_image(path, bbox, draw_bbox)
+            all_images.append(img)
+    
+    # Process all images into tensors
+    if all_images:
+        img_tensors = torch.cat([
             image_processor.preprocess(img, return_tensors="pt")["pixel_values"].half()
-            for img in images
-            if img is not None
-        ]
-    ).cuda()
+            for img in all_images
+        ]).cuda()
+    else:
+        raise Exception("no images!")
 
     # Prepare all inputs in batch
     input_ids_list = []
-    image_indices = []  # To track which image goes with which input
+    image_counts = []  # Track how many images each input has
 
-    for i, (text, image_path) in enumerate(zip(batch_text_strs, batch_image_paths)):
-        # Create a fresh conversation for each input to avoid contamination
-        conv = conv_template.copy()
-
-        inp = text
-        if image_path is not None:
+    # Create a fresh conversation for each input
+    conv = conv_template.copy()
+    
+    inp = text
+    num_images = len([p for p in image_paths if p is not None])
+    image_counts.append(num_images)
+    
+    if num_images > 0:
+        # Add image tokens for each image
+        image_tokens = ""
+        for _ in range(num_images):
             if model.config.mm_use_im_start_end:
-                inp = (
+                image_tokens += (
                     DEFAULT_IM_START_TOKEN
                     + DEFAULT_IMAGE_TOKEN
                     + DEFAULT_IM_END_TOKEN
                     + "\n"
-                    + inp
                 )
             else:
-                inp = DEFAULT_IMAGE_TOKEN + "\n" + inp
+                image_tokens += DEFAULT_IMAGE_TOKEN + "\n"
+        
+        inp = image_tokens + inp
+        
+    conv.append_message(conv.roles[0], inp)
+    prompt = conv.get_prompt()
+    
+    input_ids = (
+        tokenizer_image_token(
+            prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors="pt"
+        )
+        .unsqueeze(0)
+        .cuda()
+    )
+    
+    # Create fresh conversation to get stop strings
+    conv = conv_template.copy()
+    stop_str = conv.sep if conv.sep_style != SeparatorStyle.TWO else conv.sep2
+    keywords = [stop_str]
+    stopping_criteria = KeywordsStoppingCriteria(keywords, tokenizer, input_ids)
+    streamer = TextStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
+    
+    print(f'Number of images: {num_images}')
 
-            conv.append_message(conv.roles[0], inp)
-            image_indices.append(i)  # Record which image this prompt uses
-        else:
-            conv.append_message(conv.roles[0], inp)
-
-        prompt = conv.get_prompt()
-        input_ids = (
-            tokenizer_image_token(
-                prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors="pt"
-            )
-            .unsqueeze(0)
-            .cuda()
+    with torch.inference_mode():
+        output_ids = model.generate(
+            input_ids,
+            images=img_tensors,  # Pass multiple images
+            do_sample=True,
+            temperature=0.2,
+            max_new_tokens=1024,
+            streamer=streamer,
+            use_cache=True,
+            stopping_criteria=[stopping_criteria],
         )
 
-        input_ids_list.append(input_ids)
+    outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
+    
+    if len(outputs) == 0:
+        raise ValueError(f'Output should not have 0 length!', outputs)
 
-    # Process all inputs in one batch
-    responses = []
-    for i, input_ids in enumerate(input_ids_list):
-        # Create fresh conversation to get stop strings
-        conv = conv_template.copy()
-        stop_str = conv.sep if conv.sep_style != SeparatorStyle.TWO else conv.sep2
-        keywords = [stop_str]
-        stopping_criteria = KeywordsStoppingCriteria(keywords, tokenizer, input_ids)
-        streamer = TextStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
+    print(f"outputs: {outputs}")
 
-        # Get the correct image tensor for this input
-        img_tensor = (
-            image_tensors[image_indices.index(i)].unsqueeze(0)
-            if i in image_indices
-            else None
-        )
-
-        print("batch_text_strs", batch_text_strs)
-
-        with torch.inference_mode():
-            output_ids = model.generate(
-                input_ids,
-                images=img_tensor,
-                do_sample=True,
-                temperature=0.2,
-                max_new_tokens=1024,
-                streamer=streamer,
-                use_cache=True,
-                stopping_criteria=[stopping_criteria],
-            )
-
-        # outputs_dec = tokenizer.decode(output_ids[0, input_ids.shape[1]:])
-        outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[
-            0
-        ].strip()
-
-        print("outputs tokenizer.batch_decode", outputs)
-
-        if len(outputs) == 0:
-            raise ValueError(f"Output should not have 0 length!", outputs)
-
-        print(batch_text_strs[i])
-        print(f"OUTPUT:", outputs)
-        # with open(f"raw_output_{i}.txt", "w") as f:
-        #     f.write(outputs)
-
-        responses.append(outputs)
-
-    # The rest of your code for processing responses remains the same
-    # Group responses by original question (for multiple prompt questions)
-    response_dict = {}
-    for i, response in enumerate(responses):
-        question = batch_questions[i]
-        question_id = question.question_id  # Use object id as a unique identifier
-
-        if question_id not in response_dict:
-            response_dict[question_id] = {"question": question, "responses": []}
-
-        response_dict[question_id]["responses"].append(response)
-
-    # Process each question's responses
-    for question_data in response_dict.values():
-        question = question_data["question"]
-        responses = question_data["responses"]
-
-        if isinstance(question, SingleImageMultipleChoiceQuestion):
-            # Only one response for single prompt questions
-            # answer = parse_multiple_choice_response(responses[0], question.choices)
-            # answer = MultipleChoiceAnswer(answer=answer, choices=question.choices)
-
-            # Create prediction answer
-            answer = RawTextAnswer(text=responses[0])
-
-        # elif isinstance(question, SingleImageMultiplePromptQuestion):
-        #     # Multiple responses for multiple prompt questions
-        #     answer = determine_best_answer_from_prompts(responses, question.choices)
-        #     answer = MultipleChoiceAnswer(answer=answer, choices=question.choices)
-
-        else:
-            raise TypeError(
-                f"question should be multiple choice {question.__class__.__name__}"
-            )
-        pred_dataset.add_sample(question, answer)
-
+    answer = RawTextAnswer(text=outputs)
+        
+    pred_dataset.add_sample(question, answer)
 
 def parse_multiple_choice_response(response: str, choices: List[str]) -> str:
     """
@@ -639,7 +471,7 @@ def main():
     metric = MultipleChoiceMetric()
 
     metric_results = metric.evaluate_dataset(pred_dataset, gt_dataset)
-    model_name = get_model_name_from_path(args.base_path)
+    model_name = get_model_name_from_path(llava_args.base_path)
 
     summarised_results = metric.summarise(metric_results)
     summarised_results["model_name"] = model_name

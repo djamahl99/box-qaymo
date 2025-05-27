@@ -27,6 +27,9 @@ from waymovqa.data.object_info import (
 )
 from waymovqa.prompt_generators import BasePromptGenerator, register_prompt_generator
 
+from waymovqa.questions.multi_frame_multi_choice import (
+    MultipleFrameMultipleChoiceQuestion,
+)
 from waymovqa.questions.multi_image_multi_choice import (
     MultipleImageMultipleChoiceQuestion,
 )
@@ -141,13 +144,15 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
         if config:
             self.config.update(config)
 
+        random.seed(42)
+
         self.prompt_functions = [
             self._prompt_faster_than_ego,
             self._prompt_moving_towards_ego,
             self._prompt_parallel_motion,
             self._prompt_approaching_stop_sign,
             self._prompt_vehicle_future_path,
-            self._prompt_ego_following,
+            # self._prompt_ego_following,
         ]
 
     def _balance_neg_pos(
@@ -161,10 +166,10 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
             return []
 
         if num_neg == 0:
-            return positive_samples  # Can't balance without negatives
+            return random.choice(positive_samples)  # Can't balance without negatives
 
         if num_pos == 0:
-            return negative_samples  # Can't balance without positives
+            return random.choice(negative_samples)  # Can't balance without positives
 
         # Calculate the maximum total samples we can have while maintaining the ratio
         # Given the constraints of available samples
@@ -354,150 +359,137 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
 
         return choices, results
 
-    def _prompt_ego_following(
-        self,
-        trajectories,
-        speeds,
-        accels,
-        ego_positions,
-        ego_speeds,
-        ego_vectors,
-        timestamps,
-        frames,
-        obj_types,
-        obj_cvat_types,
-        correlation_threshold=0.7,  # Correlation threshold for similar paths
-        temporal_lag_max=10,
-        min_trajectory_length=10,
-        min_speed=5.0,
-    ):
-        results = []
-        choices = ["yes", "no"]
+    # def _prompt_ego_following(
+    #     self,
+    #     trajectories,
+    #     speeds,
+    #     accels,
+    #     ego_positions,
+    #     ego_speeds,
+    #     ego_vectors,
+    #     timestamps,
+    #     frames,
+    #     obj_types,
+    #     obj_cvat_types,
+    #     max_variance=5.0,
+    #     min_trajectory_length=10,
+    #     min_speed=5.0,
+    #     distance_threshold=15.0,
+    #     velocity_alignment_thresh=0.7
+    # ):
+    #     results = []
+    #     choices = ["yes", "no"]
 
-        templates = [
-            "Is the ego vehicle following the {}?",
-            "Is the ego vehicle behind and following the {}?",
-        ]
+    #     templates = [
+    #         "Is the ego vehicle following the {}?",
+    #         "Is the ego vehicle behind and following the {}?",
+    #     ]
 
-        for obj_id in trajectories.keys():
-            if obj_types[obj_id] not in ["Vehicle", "Pedestrian", "Cyclist"]:
-                continue
-            obj_trajectory = trajectories[obj_id]
-            obj_speeds = speeds[obj_id]
+    #     ego_velocity = np.gradient(ego_positions, axis=0) / FRAME_DELTA
+    #     ego_direction = ego_velocity / (
+    #         np.linalg.norm(ego_velocity, axis=1, keepdims=True) + 1e-8
+    #     )
 
-            template = random.choice(templates)
+    #     obj_samples = defaultdict(list)
+    #     objects_followed_per_frame = [[] for _ in timestamps]
+    #     all_descriptions = set()
 
-            # Filter for moving segments
-            moving_mask = (obj_speeds > min_speed) & (ego_speeds > min_speed)
-            if np.sum(moving_mask) < min_trajectory_length:
-                continue
+    #     for obj_id in trajectories.keys():
+    #         if obj_types[obj_id] not in ["Vehicle", "Pedestrian", "Cyclist"]:
+    #             continue
+    #         obj_trajectory = trajectories[obj_id]
+    #         obj_speeds = speeds[obj_id]
 
-            best_correlation = -1
-            best_lag = 0
-            best_timestamp_idx = 0
+    #         # Calculate relative distances over time
+    #         relative_positions = obj_trajectory - ego_positions
+    #         distances = np.linalg.norm(relative_positions, axis=1)
 
-            # Try different lags
-            for lag in range(
-                0, min(temporal_lag_max, len(obj_trajectory) - min_trajectory_length)
-            ):
-                obj_segment = obj_trajectory[lag : lag + min_trajectory_length]
-                ego_segment = ego_positions[:min_trajectory_length]
+    #         # if np.var(distances) > max_variance:
+    #         #     continue
 
-                if len(obj_segment) != len(ego_segment):
-                    continue
+    #         obj_velocity = np.gradient(obj_trajectory, axis=0) / FRAME_DELTA
 
-                # Calculate directional consistency first
-                obj_velocity = np.diff(obj_segment, axis=0)  # Velocity vectors
-                ego_velocity = np.diff(ego_segment, axis=0)  # Velocity vectors
+    #         # Calculate direction vectors
+    #         obj_direction = obj_velocity / (
+    #             np.linalg.norm(obj_velocity, axis=1, keepdims=True) + 1e-8
+    #         )
 
-                # Check if velocities are generally in same direction
-                directional_consistency = []
-                for i in range(len(obj_velocity)):
-                    if (
-                        np.linalg.norm(obj_velocity[i]) > 0.1
-                        and np.linalg.norm(ego_velocity[i]) > 0.1
-                    ):
-                        # Dot product of normalized velocities
-                        dot_product = np.dot(obj_velocity[i], ego_velocity[i]) / (
-                            np.linalg.norm(obj_velocity[i])
-                            * np.linalg.norm(ego_velocity[i])
-                        )
-                        directional_consistency.append(dot_product)
+    #         # must not be too far away
+    #         distance_mask = distances < distance_threshold
 
-                if len(directional_consistency) == 0:
-                    continue
+    #         # velocity alignment
+    #         velocity_alignment = np.sum(obj_direction * ego_direction, axis=1)
+    #         print('velocity_alignment', velocity_alignment.min(), velocity_alignment.max())
 
-                mean_directional_consistency = np.mean(directional_consistency)
+    #         velocity_aligned_mask = velocity_alignment > velocity_alignment_thresh
 
-                # Skip if moving in opposite directions (negative correlation)
-                if mean_directional_consistency < 0.3:  # Threshold for same direction
-                    continue
+    #         template = random.choice(templates)
 
-                # Now calculate path correlation (but don't use absolute value)
-                correlations = []
-                for dim in range(3):  # x, y, z
-                    obj_dim = obj_segment[:, dim]
-                    ego_dim = ego_segment[:, dim]
+    #         # Filter for moving segments
+    #         moving_mask = (obj_speeds > min_speed) & (ego_speeds > min_speed)
 
-                    # Remove mean to focus on path shape
-                    obj_centered = obj_dim - np.mean(obj_dim)
-                    ego_centered = ego_dim - np.mean(ego_dim)
+    #         positive_mask = distance_mask & moving_mask & velocity_aligned_mask
 
-                    if np.std(obj_centered) > 0.1 and np.std(ego_centered) > 0.1:
-                        corr = np.corrcoef(obj_centered, ego_centered)[0, 1]
-                        if (
-                            not np.isnan(corr) and corr > 0
-                        ):  # Only positive correlations
-                            correlations.append(corr)
+    #         positive_idx = np.where(positive_mask)[0]
 
-                if len(correlations) > 0:
-                    mean_correlation = np.mean(correlations)
-                    # Combine correlation with directional consistency
-                    combined_score = mean_correlation * mean_directional_consistency
+    #         for frame_idx in positive_idx:
+    #             obj = next(
+    #                 (
+    #                     obj
+    #                     for obj in frames[frame_idx].objects
+    #                     if obj.id == obj_id
+    #                 ),
+    #                 None,
+    #             )
 
-                    if combined_score > best_correlation:
-                        best_correlation = combined_score
-                        best_lag = lag
-                        best_timestamp_idx = lag + min_trajectory_length // 2
+    #             if obj is None:
+    #                 continue
 
-            if best_correlation > 0:
-                timestamp = timestamps[min(best_timestamp_idx, len(timestamps) - 1)]
+    #             res = {
+    #                 "object_id": obj_id,
+    #                 "timestamp": int(timestamps[frame_idx]),
+    #                 "question": template.format(obj.get_object_description()),
+    #                 "answer_description": f"following similar path (velocity_alignment: {velocity_alignment[frame_idx]:.2f}, distance: {distances[frame_idx]:.2f}, dist variance={np.var(distances):.2f})",
+    #                 "answer": "yes",
+    #             }
 
-                obj = next(
-                    (
-                        obj
-                        for obj in frames[best_timestamp_idx].objects
-                        if obj.id == obj_id
-                    ),
-                    None,
-                )
-                if obj is None:
-                    continue
+    #             obj_samples[obj_id].append(res)
+    #             objects_followed_per_frame[frame_idx].append(obj.get_object_description())
+    #             all_descriptions.add(obj.get_object_description())
 
-                if best_correlation > correlation_threshold:
-                    results.append(
-                        {
-                            "object_id": obj_id,
-                            "timestamp": int(timestamp),
-                            "question": template.format(obj.get_object_description()),
-                            "answer_description": f"following similar path (score: {best_correlation:.2f})",
-                            "answer": "yes",
-                            "confidence": float(best_correlation),
-                        }
-                    )
-                else:
-                    results.append(
-                        {
-                            "object_id": obj_id,
-                            "timestamp": int(timestamp),
-                            "question": template.format(obj.get_object_description()),
-                            "answer_description": f"different path/direction (score: {best_correlation:.2f})",
-                            "answer": "no",
-                            "confidence": float(1.0 - best_correlation),
-                        }
-                    )
+    #     neg_samples = []
+    #     for frame_idx, timestamp in enumerate(timestamps):
+    #         for obj in frames[frame_idx].objects:
+    #             if obj_types[obj_id] not in ["Vehicle", "Pedestrian", "Cyclist"]:
+    #                 continue
+    #             description = obj.get_object_description()
+    #             if description in objects_followed_per_frame[frame_idx]:
+    #                 continue
 
-        return choices, results
+    #             template = random.choice(templates)
+
+    #             res = {
+    #                 "object_id": obj.id,
+    #                 "timestamp": int(timestamp),
+    #                 "question": template.format(description),
+    #                 "answer_description": f"mined negative sample",
+    #                 "answer": "no",
+    #             }
+    #             neg_samples.append(res)
+
+    #     pos_samples = []
+    #     for obj_id, samples in obj_samples.items():
+    #         print(f'{obj_id} -> {len(samples)} samples')
+    #         pos_samples.append(random.choice(samples))
+
+    #     print('neg_samples, pos_samples', len(neg_samples), len(pos_samples))
+
+    #     if len(pos_samples) > 0:
+    #         results = self._balance_neg_pos(neg_samples, pos_samples)
+    #     else:
+    #         results = [random.choice(neg_samples)]
+
+    #     return choices, results
 
     def _prompt_approaching_stop_sign(
         self,
@@ -801,6 +793,9 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
         frames,
         obj_types,
         obj_cvat_types,
+        forward_thresh=0.3,
+        trajectory_thresh=5.0,
+        ego_speed_thresh=5.0,
     ):
         results = []
         choices = ["yes", "no"]
@@ -815,7 +810,7 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
         def _handle_sample(
             frame_idx: int,
             object_id: str,
-            distance: float,
+            trajectory_distance: float,
             positive: bool,
         ):
             """Handles generating a question for a positive/negative situation."""
@@ -838,8 +833,8 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
                     None,
                 )
             else:
-                # For negative samples without specific objects, use any camera
-                cam = next((cam for cam in frame.cameras), None)
+                # For negative samples without specific objects, use front
+                cam = next((cam for cam in frame.cameras if cam.name == "FRONT"), None)
 
             if cam is None:
                 return None
@@ -847,9 +842,7 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
             template = random.choice(templates)
 
             if positive:
-                answer_description = (
-                    f"vehicle in path ahead, {distance:.2f} metres away."
-                )
+                answer_description = f"vehicle in path ahead, {trajectory_distance:.2f} metres away from future ego path."
             else:
                 answer_description = f"no vehicles in immediate path ahead."
 
@@ -860,8 +853,9 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
                 "question": template,
                 "answer_description": answer_description,
                 "answer": "yes" if positive else "no",
+                "confidence": -1.0 * trajectory_distance,
                 "metadata": {
-                    "distance": distance if positive else None,
+                    "distance": trajectory_distance if positive else None,
                     "camera_name": cam.name,
                 },
             }
@@ -881,14 +875,21 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
             world_pose = np.array(frame.pose, dtype=float).reshape(4, 4)
             ego_y_axis = world_pose[:3, 1]
 
-            left_edge = ego_positions[frame_idx] + 1.5 * ego_y_axis
-            right_edge = ego_positions[frame_idx] - 1.5 * ego_y_axis
+            left_edge = ego_positions[frame_idx] + 0.5 * ego_y_axis
+            right_edge = ego_positions[frame_idx] - 0.5 * ego_y_axis
 
             road_left.append(left_edge)
             road_right.append(right_edge)
 
         road_left = np.stack(road_left, axis=0)
         road_right = np.stack(road_right, axis=0)
+
+        valid_speed = ego_speeds > ego_speed_thresh  # Only when ego is moving
+
+        # Normalize ego direction vectors
+        ego_forward_normalized = ego_vectors / (
+            np.linalg.norm(ego_vectors, axis=1, keepdims=True) + 1e-6
+        )
 
         # Store frame-level information
         frame_samples = []  # Will store (frame_idx, obj_id, distance, is_positive)
@@ -906,14 +907,16 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
             distances = np.linalg.norm(relative_positions, axis=1)
             distance_mask = distances < DEFAULT_CONFIG["distance_threshold"]
 
-            # Normalize ego direction vectors
-            ego_speed = np.linalg.norm(ego_vectors, axis=1)
-            valid_speed = ego_speed > 0.1  # Only when ego is moving
+            # at some point they're within ~5 metres
+            trajectory_distances = []
+            for pos_i, veh_pos in enumerate(vehicle_positions):
+                dists = np.linalg.norm(
+                    ego_positions[pos_i:, :2] - veh_pos[np.newaxis, :2], axis=1
+                )
+                trajectory_distances.append(dists.min())
+            trajectory_distances = np.array(trajectory_distances).reshape(-1)
 
-            ego_forward_normalized = np.zeros_like(ego_vectors)
-            ego_forward_normalized[valid_speed] = (
-                ego_vectors[valid_speed] / ego_speed[valid_speed, np.newaxis]
-            )
+            future_dist_mask = trajectory_distances < trajectory_thresh
 
             # Dot product to check if object is in front
             forward_component = np.sum(
@@ -921,7 +924,7 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
             )
 
             # Object is in front if projection is positive AND ego is moving
-            in_front_mask = (forward_component > 0) & valid_speed
+            in_front_mask = (forward_component > forward_thresh) & valid_speed
 
             # Check which frames have vehicle in same lane (for more accurate "future path")
             same_lane_mask = self._is_vehicle_in_same_lane(
@@ -930,7 +933,9 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
 
             # DECISION: What constitutes "future path"?
             # Option 1: Same lane ahead (more restrictive)
-            future_path_mask = distance_mask & in_front_mask & same_lane_mask
+            future_path_mask = (
+                distance_mask & in_front_mask & (same_lane_mask | future_dist_mask)
+            )
 
             # Option 2: Any vehicle ahead (less restrictive)
             # future_path_mask = distance_mask & in_front_mask
@@ -943,33 +948,75 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
 
             # Store positive samples
             for frame_idx in positive_idx:
-                frame_samples.append((frame_idx, obj_id, distances[frame_idx], True))
+                frame_samples.append(
+                    (frame_idx, obj_id, trajectory_distances[frame_idx], True)
+                )
 
             # Store negative samples
             for frame_idx in negative_idx:
-                frame_samples.append((frame_idx, obj_id, distances[frame_idx], False))
-
-        # Add some frames with no vehicles as negatives
-        frames_with_vehicles = set(sample[0] for sample in frame_samples)
-        frames_without_vehicles = list(set(range(len(frames))) - frames_with_vehicles)
-
-        # Sample some frames without vehicles
-        num_no_vehicle_negatives = min(
-            len(frames_without_vehicles), len([s for s in frame_samples if s[3]])
-        )
-        if num_no_vehicle_negatives > 0:
-            sampled_empty_frames = random.sample(
-                frames_without_vehicles, num_no_vehicle_negatives
-            )
-            for frame_idx in sampled_empty_frames:
-                frame_samples.append((frame_idx, None, 0.0, False))
+                frame_samples.append(
+                    (frame_idx, obj_id, trajectory_distances[frame_idx], False)
+                )
 
         # Process all samples
-        processed_samples = []
-        for frame_idx, obj_id, distance, is_positive in frame_samples:
-            sample = _handle_sample(frame_idx, obj_id, distance, is_positive)
+        num_neg, num_pos, num_no_obj = 0, 0, 0
+        pos_per_obj = defaultdict(list)
+        neg_per_obj = defaultdict(list)
+        empty_samples = []
+        total = 0
+        for frame_idx, obj_id, trajectory_distance, is_positive in frame_samples:
+            sample = _handle_sample(frame_idx, obj_id, trajectory_distance, is_positive)
             if sample is not None:
-                processed_samples.append(sample)
+                total += 1
+                if is_positive:
+                    num_pos += 1
+                    pos_per_obj[obj_id].append(sample)
+                else:
+                    num_neg += 1
+                    neg_per_obj[obj_id].append(sample)
+
+                if obj_id is None:
+                    empty_samples.append(sample)
+
+        total = max(1, total)
+        num_empty = len(empty_samples)
+        print(
+            "num_neg, num_pos, num_no_obj, total",
+            num_neg,
+            num_pos,
+            num_no_obj,
+            num_empty,
+            total,
+        )
+        print(
+            "num_neg, num_pos, num_no_obj",
+            num_neg / total,
+            num_pos / total,
+            num_no_obj / total,
+            num_empty / total,
+        )
+
+        negative_samples, positive_samples = [], []
+        neg_drwn = 0
+        pos_drwn = 0
+        obj_seen_set = set(list(pos_per_obj.keys()) + list(neg_per_obj.keys()))
+        for obj_id in obj_seen_set:
+            # randomly get a positive sample
+            neg_sample, pos_sample = None, None
+            if obj_id in pos_per_obj:
+                pos_sample = random.choice(pos_per_obj[obj_id])
+                positive_samples.append(pos_sample)
+                pos_drwn += 1
+            if obj_id in neg_per_obj:
+                neg_sample = random.choice(neg_per_obj[obj_id])
+                negative_samples.append(neg_sample)
+                neg_drwn += 1
+
+        if len(positive_samples) == 0 or len(negative_samples) == 0:
+            return choices, []
+
+        processed_samples = self._balance_neg_pos(negative_samples, positive_samples)
+        print("neg_drwn, pos_drwn, total", neg_drwn, pos_drwn, neg_drwn + pos_drwn)
 
         return choices, processed_samples
 
@@ -1485,8 +1532,6 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
 
             #
             choices, questions = prompt_out
-            
-
 
             for question_dict in questions:
                 try:
@@ -1496,14 +1541,13 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
                     answer_txt = question_dict["answer"]
                 except TypeError as e:
                     print("Typeerror:", e)
-                    print('questions', type(questions))
-                    print('questions', questions)
-                    print('question_dict', type(question_dict))
-                    print('prompt_func', prompt_func)
-                    print('prompt_func.__name__', prompt_func.__name__)
-                    print('question_dict', question_dict)
+                    print("questions", type(questions))
+                    print("questions", questions)
+                    print("question_dict", type(question_dict))
+                    print("prompt_func", prompt_func)
+                    print("prompt_func.__name__", prompt_func.__name__)
+                    print("question_dict", question_dict)
                     raise e
-
 
                 frame_idx = next(
                     (idx for idx, time in enumerate(timestamps) if time == timestamp),
@@ -2033,12 +2077,490 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
 
         plt.close()
 
+    def visualize_trajectories_plotly(
+        self,
+        object_id,
+        trajectories,
+        ego_positions,
+        frame,
+        camera,
+        timestamps: np.ndarray,
+        save_path=None,
+        question_txt="",
+        answer_txt="",
+        answer_description="",
+    ):
+        """
+        Simple but modern Plotly trajectory visualization that avoids subplot complexities.
+        Creates separate figures for different views that can be displayed together.
+        """
+        import plotly.graph_objects as go
+        import plotly.express as px
+        import numpy as np
+        from PIL import Image
+        import base64
+        from io import BytesIO
+
+        # Get object and timestamp info
+        obj = next(obj for obj in frame.objects if obj.id == object_id)
+        timestamp_idx = next(
+            idx for idx, time in enumerate(timestamps) if time == frame.timestamp
+        )
+
+        # Prepare trajectory data
+        traj1 = (
+            trajectories[object_id]
+            if trajectories is not None
+            else np.zeros((0, 3), dtype=float)
+        )
+        traj2 = (
+            ego_positions
+            if ego_positions is not None
+            else np.zeros((0, 3), dtype=float)
+        )
+        obj1_desc = obj.get_object_description()
+        obj2_desc = "Ego Vehicle"
+
+        # === MAIN 3D TRAJECTORY PLOT ===
+
+        fig_3d = go.Figure()
+
+        # Create color scales for time progression
+        n_points = len(traj1)
+        time_colors = np.linspace(0, 1, n_points)
+
+        # Object trajectory
+        fig_3d.add_trace(
+            go.Scatter3d(
+                x=traj1[:, 0],
+                y=traj1[:, 1],
+                z=traj1[:, 2] if traj1.shape[1] > 2 else np.zeros(len(traj1)),
+                mode="lines+markers",
+                line=dict(
+                    color=time_colors,
+                    colorscale="Viridis",
+                    width=6,
+                    colorbar=dict(title="Time Progress"),
+                ),
+                marker=dict(size=4, opacity=0.8),
+                name=obj1_desc,
+                hovertemplate=(
+                    f"<b>{obj1_desc}</b><br>"
+                    "Position: (%{x:.2f}, %{y:.2f}, %{z:.2f})<br>"
+                    "Time: %{text}<br>"
+                    "<extra></extra>"
+                ),
+                text=[f"t={t:.2f}s" for t in timestamps],
+            )
+        )
+
+        # Ego trajectory
+        fig_3d.add_trace(
+            go.Scatter3d(
+                x=traj2[:, 0],
+                y=traj2[:, 1],
+                z=traj2[:, 2] if traj2.shape[1] > 2 else np.zeros(len(traj2)),
+                mode="lines+markers",
+                line=dict(color=time_colors, colorscale="Plasma", width=6),
+                marker=dict(size=4, opacity=0.8),
+                name=obj2_desc,
+                hovertemplate=(
+                    f"<b>{obj2_desc}</b><br>"
+                    "Position: (%{x:.2f}, %{y:.2f}, %{z:.2f})<br>"
+                    "Time: %{text}<br>"
+                    "<extra></extra>"
+                ),
+                text=[f"t={t:.2f}s" for t in timestamps],
+            )
+        )
+
+        # Add waypoints
+        waypoints = [
+            (0, "start", "circle", ["green", "red"]),
+            (timestamp_idx, "current", "diamond", ["blue", "orange"]),
+            (-1, "end", "square", ["darkgreen", "darkred"]),
+        ]
+
+        for idx, label, symbol, colors in waypoints:
+            # Object waypoint
+            fig_3d.add_trace(
+                go.Scatter3d(
+                    x=[traj1[idx, 0]],
+                    y=[traj1[idx, 1]],
+                    z=[traj1[idx, 2] if traj1.shape[1] > 2 else 0],
+                    mode="markers",
+                    marker=dict(
+                        size=12,
+                        color=colors[0],
+                        symbol=symbol,
+                        line=dict(width=2, color="white"),
+                    ),
+                    name=f"{obj1_desc} ({label})",
+                    showlegend=True,
+                    hovertemplate=f"<b>{obj1_desc} ({label})</b><br>Time: {timestamps[idx]:.2f}s<extra></extra>",
+                )
+            )
+
+            # Ego waypoint
+            fig_3d.add_trace(
+                go.Scatter3d(
+                    x=[traj2[idx, 0]],
+                    y=[traj2[idx, 1]],
+                    z=[traj2[idx, 2] if traj2.shape[1] > 2 else 0],
+                    mode="markers",
+                    marker=dict(
+                        size=12,
+                        color=colors[1],
+                        symbol=symbol,
+                        line=dict(width=2, color="white"),
+                    ),
+                    name=f"{obj2_desc} ({label})",
+                    showlegend=True,
+                    hovertemplate=f"<b>{obj2_desc} ({label})</b><br>Time: {timestamps[idx]:.2f}s<extra></extra>",
+                )
+            )
+
+        # Update 3D layout
+        fig_3d.update_layout(
+            scene=dict(
+                xaxis_title="X (m)",
+                yaxis_title="Y (m)",
+                zaxis_title="Z (m)",
+                camera=dict(eye=dict(x=1.5, y=1.5, z=1.5)),
+                aspectmode="cube",
+            ),
+            title=dict(
+                text=f"3D Trajectory Analysis - {obj1_desc}", x=0.5, font=dict(size=20)
+            ),
+            height=600,
+            showlegend=True,
+            annotations=[
+                dict(
+                    text=(
+                        f"<b>Scene Metadata</b><br>"
+                        f"Scene ID: {obj.scene_id}<br>"
+                        f"Timestamp: {frame.timestamp:.2f}s<br>"
+                        f"Camera: {camera.name}<br>"
+                        f"Question: {question_txt}<br>"
+                        f"Answer: {answer_txt}"
+                    ),
+                    showarrow=False,
+                    xref="paper",
+                    yref="paper",
+                    x=0.02,
+                    y=0.98,
+                    bgcolor="rgba(255,255,255,0.9)",
+                    bordercolor="gray",
+                    borderwidth=1,
+                    font=dict(size=10),
+                )
+            ],
+        )
+
+        # === TIMELINE PLOT ===
+
+        fig_timeline = go.Figure()
+
+        # Calculate distance between trajectories over time
+        distances = np.linalg.norm(traj1 - traj2, axis=1)
+
+        fig_timeline.add_trace(
+            go.Scatter(
+                x=timestamps,
+                y=distances,
+                mode="lines+markers",
+                line=dict(color="orange", width=3),
+                marker=dict(size=8, color="orange"),
+                name="Distance",
+                hovertemplate="<b>Distance</b><br>Time: %{x:.2f}s<br>Distance: %{y:.2f}m<extra></extra>",
+            )
+        )
+
+        # Add current time marker
+        fig_timeline.add_trace(
+            go.Scatter(
+                x=[timestamps[timestamp_idx]],
+                y=[distances[timestamp_idx]],
+                mode="markers",
+                marker=dict(size=15, color="red", symbol="diamond"),
+                name="Current Time",
+                hovertemplate=f"<b>Current Time</b><br>Time: {timestamps[timestamp_idx]:.2f}s<br>Distance: {distances[timestamp_idx]:.2f}m<extra></extra>",
+            )
+        )
+
+        # Add vertical line for current time
+        fig_timeline.add_shape(
+            type="line",
+            x0=timestamps[timestamp_idx],
+            y0=0,
+            x1=timestamps[timestamp_idx],
+            y1=max(distances),
+            line=dict(color="red", width=2, dash="dash"),
+        )
+
+        fig_timeline.update_layout(
+            title="Distance Between Objects Over Time",
+            xaxis_title="Time (s)",
+            yaxis_title="Distance (m)",
+            height=400,
+            showlegend=True,
+        )
+
+        # === CAMERA VIEW PLOT ===
+
+        fig_camera = go.Figure()
+
+        try:
+            # Load and process camera image
+            if hasattr(camera, "image_path") and camera.image_path:
+                img = Image.open(camera.image_path)
+
+                # Project trajectories to image coordinates
+                pose_matrix_inv = np.linalg.inv(np.array(frame.pose))
+
+                # Transform trajectories to ego coordinates
+                traj1_ego = np.hstack([traj1.reshape(-1, 3), np.ones((len(traj1), 1))])
+                traj1_ego = np.matmul(traj1_ego, pose_matrix_inv.T)[:, :3]
+
+                traj2_ego = np.hstack([traj2.reshape(-1, 3), np.ones((len(traj2), 1))])
+                traj2_ego = np.matmul(traj2_ego, pose_matrix_inv.T)[:, :3]
+
+                # Project to image coordinates
+                proj_points1 = camera.project_to_image(traj1_ego, frame)
+                proj_points1_ok = proj_points1[:, -1].astype(bool) & (
+                    proj_points1[:, 2] > 0
+                )
+                proj_points1 = proj_points1[proj_points1_ok]
+
+                proj_points2 = camera.project_to_image(traj2_ego, frame)
+                proj_points2_ok = proj_points2[:, -1].astype(bool) & (
+                    proj_points2[:, 2] > 0
+                )
+                proj_points2 = proj_points2[proj_points1_ok]
+
+                # Add background image
+                buffered = BytesIO()
+                img.save(buffered, format="PNG")
+                img_str = base64.b64encode(buffered.getvalue()).decode()
+
+                fig_camera.add_layout_image(
+                    dict(
+                        source=f"data:image/png;base64,{img_str}",
+                        xref="x",
+                        yref="y",
+                        x=0,
+                        y=0,
+                        sizex=img.width,
+                        sizey=img.height,
+                        sizing="stretch",
+                        opacity=1.0,
+                        layer="below",
+                    )
+                )
+
+                # Add projected trajectories
+                fig_camera.add_trace(
+                    go.Scatter(
+                        x=proj_points1[:, 0],
+                        y=proj_points1[:, 1],
+                        mode="lines+markers",
+                        line=dict(color="cyan", width=4),
+                        marker=dict(size=6, color="cyan"),
+                        name=f"{obj1_desc} (projected)",
+                        hovertemplate="<b>Image Coordinates</b><br>x: %{x}<br>y: %{y}<extra></extra>",
+                    )
+                )
+
+                fig_camera.add_trace(
+                    go.Scatter(
+                        x=proj_points2[:, 0],
+                        y=proj_points2[:, 1],
+                        mode="lines+markers",
+                        line=dict(color="magenta", width=4),
+                        marker=dict(size=6, color="magenta"),
+                        name=f"{obj2_desc} (projected)",
+                        hovertemplate="<b>Image Coordinates</b><br>x: %{x}<br>y: %{y}<extra></extra>",
+                    )
+                )
+
+                # Add waypoint markers
+                waypoint_indices = [0, timestamp_idx, -1]
+                waypoint_colors = ["green", "blue", "darkgreen"]
+                waypoint_symbols = ["circle", "diamond", "square"]
+
+                for i, (idx, color, symbol) in enumerate(
+                    zip(waypoint_indices, waypoint_colors, waypoint_symbols)
+                ):
+                    if len(proj_points1) > abs(idx):
+                        fig_camera.add_trace(
+                            go.Scatter(
+                                x=[proj_points1[idx, 0]],
+                                y=[proj_points1[idx, 1]],
+                                mode="markers",
+                                marker=dict(
+                                    size=15,
+                                    color=color,
+                                    symbol=symbol,
+                                    line=dict(width=2, color="white"),
+                                ),
+                                name=f"{obj1_desc} ({'start' if i==0 else 'current' if i==1 else 'end'})",
+                                showlegend=True,
+                                hovertemplate=f"<b>{obj1_desc}</b><br>x: %{{x}}<br>y: %{{y}}<extra></extra>",
+                            )
+                        )
+
+                    if len(proj_points2) > abs(idx):
+                        ego_color = (
+                            "red"
+                            if color == "green"
+                            else "orange" if color == "blue" else "darkred"
+                        )
+                        fig_camera.add_trace(
+                            go.Scatter(
+                                x=[proj_points2[idx, 0]],
+                                y=[proj_points2[idx, 1]],
+                                mode="markers",
+                                marker=dict(
+                                    size=15,
+                                    color=ego_color,
+                                    symbol=symbol,
+                                    line=dict(width=2, color="white"),
+                                ),
+                                name=f"{obj2_desc} ({'start' if i==0 else 'current' if i==1 else 'end'})",
+                                showlegend=True,
+                                hovertemplate=f"<b>{obj2_desc}</b><br>x: %{{x}}<br>y: %{{y}}<extra></extra>",
+                            )
+                        )
+
+                # Update camera view layout
+                fig_camera.update_layout(
+                    title=f"Camera View - {camera.name}",
+                    xaxis=dict(
+                        range=[0, img.width], title="X (pixels)", showgrid=False
+                    ),
+                    yaxis=dict(
+                        range=[img.height, 0], title="Y (pixels)", showgrid=False
+                    ),  # Flip Y axis
+                    height=600,
+                    showlegend=True,
+                    plot_bgcolor="rgba(0,0,0,0)",  # Transparent background
+                    annotations=[
+                        dict(
+                            text=(
+                                f"<b>Scene Metadata</b><br>"
+                                f"Scene ID: {obj.scene_id}<br>"
+                                f"Timestamp: {frame.timestamp:.2f}s<br>"
+                                f"Camera: {camera.name}<br>"
+                                f"Question: {question_txt}<br>"
+                                f"Answer: {answer_txt}"
+                            ),
+                            showarrow=False,
+                            xref="paper",
+                            yref="paper",
+                            x=0.02,
+                            y=0.98,
+                            bgcolor="rgba(255,255,255,0.9)",
+                            bordercolor="gray",
+                            borderwidth=1,
+                            font=dict(size=10),
+                        )
+                    ],
+                )
+        except Exception as e:
+            print(f"Error loading camera image: {e}")
+            fig_camera.add_annotation(
+                text="Camera image unavailable",
+                xref="paper",
+                yref="paper",
+                x=0.5,
+                y=0.5,
+                showarrow=False,
+                font=dict(size=16, color="red"),
+            )
+            fig_camera.update_layout(
+                title="Camera View (Image Unavailable)", height=400
+            )
+
+        # === SAVE OR DISPLAY ===
+
+        figures = {
+            "3d_trajectory": fig_3d,
+            "timeline": fig_timeline,
+            "camera_view": fig_camera,
+        }
+
+        if save_path:
+            base_path = save_path.replace(".html", "").replace(".png", "")
+
+            if save_path.endswith(".html"):
+                # Save as combined HTML with all three plots
+                combined_html = f"""
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>Trajectory Analysis - {obj1_desc}</title>
+                    <style>
+                        body {{ font-family: Arial, sans-serif; margin: 20px; }}
+                        .plot-container {{ margin: 20px 0; }}
+                        h1, h2 {{ color: #333; }}
+                    </style>
+                </head>
+                <body>
+                    <h1>Trajectory Analysis: {obj1_desc}</h1>
+                    <p><strong>Scene:</strong> {obj.scene_id} | <strong>Time:</strong> {frame.timestamp:.2f}s | <strong>Camera:</strong> {camera.name}</p>
+                    
+                    <div class="plot-container">
+                        <h2>3D Trajectory View</h2>
+                        {fig_3d.to_html(include_plotlyjs=False, div_id="3d-plot")}
+                    </div>
+                    
+                    <div class="plot-container">
+                        <h2>Timeline Analysis</h2>
+                        {fig_timeline.to_html(include_plotlyjs=False, div_id="timeline-plot")}
+                    </div>
+                    
+                    <div class="plot-container">
+                        <h2>Camera View</h2>
+                        {fig_camera.to_html(include_plotlyjs=False, div_id="camera-plot")}
+                    </div>
+                    
+                    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+                </body>
+                </html>
+                """
+
+                with open(save_path, "w") as f:
+                    f.write(combined_html)
+
+            else:
+                # Save individual plots as images
+                fig_3d.write_image(
+                    f"{base_path}_3d.png", width=1200, height=800, scale=2
+                )
+                fig_timeline.write_image(
+                    f"{base_path}_timeline.png", width=1200, height=600, scale=2
+                )
+                fig_camera.write_image(
+                    f"{base_path}_camera.png", width=1200, height=800, scale=2
+                )
+
+            print(f"Plots saved with base path: {base_path}")
+        else:
+            # Display all figures
+            fig_3d.show()
+            fig_timeline.show()
+            fig_camera.show()
+
+        return figures
+
     def visualise_sample(
         self,
         question_obj: MultipleImageMultipleChoiceQuestion,
         answer_obj: MultipleChoiceAnswer,
         save_path,
         frames,
+        pred_answer_obj: Optional[MultipleChoiceAnswer] = None,
+        extra_text="",
         figsize=(12, 8),
         box_color="green",
         text_fontsize=12,
@@ -2066,35 +2588,77 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
         best_camera_name = question_obj.data["best_camera_name"]
         answer_description = question_obj.data["question_dict"]["answer_description"]
 
-        timestamps = np.array([frame.timestamp for frame in frames], dtype=int)
+        if len(frames) > 0:
+            timestamps = np.array([frame.timestamp for frame in frames], dtype=int)
 
-        (trajectories, speeds, accels, ego_positions, ego_speeds, ego_vectors) = (
-            self._calculate_trajectories(frames, timestamps)
-        )
+            (trajectories, speeds, accels, ego_positions, ego_speeds, ego_vectors) = (
+                self._calculate_trajectories(frames, timestamps)
+            )
 
-        frame = next(
-            frame for frame in frames if frame.timestamp == question_obj.timestamp
-        )
+            frame = next(
+                frame for frame in frames if frame.timestamp == question_obj.timestamp
+            )
 
-        best_camera = next(
-            camera for camera in frame.cameras if camera.name == best_camera_name
-        )
+            best_camera = next(
+                camera for camera in frame.cameras if camera.name == best_camera_name
+            )
 
-        question_txt = question_obj.question
-        answer_txt = answer_obj.answer
+            question_txt = question_obj.question
+            answer_txt = answer_obj.answer
 
-        self.visualize_trajectories(
-            object_id,
-            trajectories,
-            ego_positions,
-            frame,
-            best_camera,
-            timestamps,
-            save_path=save_path,
-            question_txt=question_txt,
-            answer_txt=answer_txt,
-            answer_description=answer_description,
-        )
+            extra_text = (
+                f"<br>Prediction: {pred_answer_obj.answer}"
+                if isinstance(pred_answer_obj, MultipleChoiceAnswer)
+                else f"<br>Raw Prediction: {pred_answer_obj.pred_answer_obj}"
+            )
+
+            self.visualize_trajectories_plotly(
+                object_id,
+                trajectories,
+                ego_positions,
+                frame,
+                best_camera,
+                timestamps,
+                save_path=str(save_path),
+                question_txt=question_txt,
+                answer_txt=answer_txt + extra_text,
+                answer_description=answer_description,
+            )
+        else:
+            from waymovqa.prompt_generators.object_prompts.object_drawn_box_prompt import (
+                ObjectDrawnBoxPromptGenerator,
+            )
+
+            single_image_question = SingleImageMultipleChoiceQuestion(
+                generator_name=question_obj.generator_name,
+                data=question_obj.data,
+                question_id=question_obj.question_id,
+                image_path=question_obj.image_paths[
+                    question_obj.camera_names.index(
+                        question_obj.data["best_camera_name"]
+                    )
+                ],
+                question=question_obj.question,
+                choices=question_obj.choices,
+                scene_id=question_obj.scene_id,
+                timestamp=question_obj.timestamp,
+                camera_name=question_obj.data["best_camera_name"],
+            )
+
+            box_prompt_generator = ObjectDrawnBoxPromptGenerator()
+            box_prompt_generator.visualise_sample(
+                single_image_question,
+                answer_obj,
+                save_path,
+                frames,
+                pred_answer_obj,
+                extra_text,
+                figsize,
+                box_color,
+                text_fontsize,
+                title_fontsize,
+                dpi,
+            )
 
     def get_question_type(self):
         """Return the type of questions generated by this generator."""
@@ -2107,3 +2671,188 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
     def get_metric_class(self):
         """Return the metric class used to evaluate answers to these questions."""
         return MultipleChoiceMetric
+
+
+@register_prompt_generator
+class EgoRelativeObjectTrajectoryMultiFramePromptGenerator(
+    EgoRelativeObjectTrajectoryPromptGenerator
+):
+    def generate(self, frames):
+        """
+        Generate questions about object trajectories.
+
+        Args:
+            frames: List of FrameInfo objects
+
+        Returns:
+            List of (question, answer) tuples
+        """
+        if not frames or len(frames) < self.config["min_trajectory_points"]:
+            return []
+
+        samples = []
+
+        timestamps = np.array([frame.timestamp for frame in frames], dtype=int)
+
+        (trajectories, speeds, accels, ego_positions, ego_speeds, ego_vectors) = (
+            self._calculate_trajectories(frames, timestamps)
+        )
+
+        obj_types = {
+            obj.id: obj.get_simple_type() for frame in frames for obj in frame.objects
+        }
+
+        obj_cvat_types = {
+            obj.id: obj.cvat_label for frame in frames for obj in frame.objects
+        }
+
+        for prompt_func in self.prompt_functions:
+            prompt_out = prompt_func(
+                trajectories,
+                speeds,
+                accels,
+                ego_positions,
+                ego_speeds,
+                ego_vectors,
+                timestamps,
+                frames,
+                obj_types,
+                obj_cvat_types,
+            )
+
+            #
+            choices, questions = prompt_out
+
+            for question_dict in questions:
+                try:
+                    timestamp = question_dict["timestamp"]
+                    object_id = question_dict["object_id"]
+                    question_txt = question_dict["question"]
+                    answer_txt = question_dict["answer"]
+                except TypeError as e:
+                    print("Typeerror:", e)
+                    print("questions", type(questions))
+                    print("questions", questions)
+                    print("question_dict", type(question_dict))
+                    print("prompt_func", prompt_func)
+                    print("prompt_func.__name__", prompt_func.__name__)
+                    print("question_dict", question_dict)
+                    raise e
+
+                frame_idx = next(
+                    (idx for idx, time in enumerate(timestamps) if time == timestamp),
+                    None,
+                )
+
+                if frame_idx is None:
+                    continue
+
+                if frame_idx == 0:
+                    frame_idx = (
+                        10  # make it the second frame if its currently the first
+                    )
+
+                previous_frame = frames[frame_idx - 1]
+                current_frame = frames[frame_idx]
+
+                current_obj = next(
+                    (obj for obj in current_frame.objects if obj.id == object_id), None
+                )
+                previous_obj = next(
+                    (obj for obj in previous_frame.objects if obj.id == object_id), None
+                )
+
+                if current_obj is None or previous_obj is None:
+                    continue
+
+                assert current_obj.id == object_id and previous_obj.id == object_id
+                best_camera_name = previous_obj.most_visible_camera_name
+
+                current_camera = next(
+                    (
+                        cam
+                        for cam in current_frame.cameras
+                        if best_camera_name == cam.name
+                    ),
+                    None,
+                )
+
+                previous_camera = next(
+                    (
+                        cam
+                        for cam in previous_frame.cameras
+                        if best_camera_name == cam.name
+                    ),
+                    None,
+                )
+
+                if current_camera is None or previous_camera is None:
+                    continue
+
+                if not current_obj.is_visible_on_camera(
+                    current_frame, current_camera
+                ) or not previous_obj.is_visible_on_camera(
+                    previous_frame, previous_camera
+                ):
+                    continue
+
+                if len(choices) > CHOICES_OPTIONS:
+                    # Remove correct answer from choices
+                    distractors = [x for x in choices if x != answer_txt]
+
+                    # Sample (CHOICES_OPTIONS - 1) distractors
+                    sampled = np.random.choice(
+                        distractors, CHOICES_OPTIONS - 1, replace=False
+                    ).tolist()
+
+                    # Add the correct answer back in
+                    choices = sampled + [answer_txt]
+
+                    # (Optional) Shuffle the final choices
+                    np.random.shuffle(choices)
+
+                if len(choices) < 2:
+                    print(f"Received only {len(choices)} choices from {prompt_func}")
+                    continue
+
+                if answer_txt is None or answer_txt not in choices:
+                    print(
+                        f"answer_txt={answer_txt} is none or not in choices={choices}"
+                    )
+                    continue
+
+                question = MultipleFrameMultipleChoiceQuestion(
+                    current_image_path=current_camera.image_path,
+                    previous_image_path=previous_camera.image_path,
+                    question=question_txt,
+                    choices=choices,
+                    scene_id=current_frame.scene_id,
+                    current_timestamp=current_frame.timestamp,
+                    previous_timestamp=previous_frame.timestamp,
+                    camera_name=best_camera_name,
+                    generator_name=f"{self.__class__.__module__}.{self.__class__.__name__}",
+                    question_name=prompt_func.__name__,
+                    data=dict(
+                        question_dict=question_dict,
+                    ),
+                    current_bbox=current_obj.get_object_bbox_2d(
+                        current_frame, current_camera
+                    ),
+                    previous_bbox=previous_obj.get_object_bbox_2d(
+                        previous_frame, previous_camera
+                    ),
+                )
+
+                answer = MultipleChoiceAnswer(
+                    choices=choices,
+                    answer=answer_txt,
+                )
+
+                samples.append((question, answer))
+
+        random.shuffle(samples)
+
+        return samples
+
+    def get_question_type(self):
+        return MultipleFrameMultipleChoiceQuestion

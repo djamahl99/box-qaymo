@@ -3,14 +3,30 @@ from typing import Dict, Any, List, Union
 
 from pathlib import Path
 
+from waymovqa.metrics.analysis import create_confusion_matrix_plotly
 from waymovqa.questions.single_image_multi_choice import SingleImageMultipleChoiceQuestion
 from waymovqa.questions.multi_image_multi_choice import MultipleImageMultipleChoiceQuestion
 from waymovqa.answers.multiple_choice import MultipleChoiceAnswer
+from waymovqa.answers.raw_text import RawTextAnswer
 
 from .base import BaseMetric
 
 from collections import defaultdict, Counter
 import numpy as np
+
+import pprint
+
+import plotly.graph_objects as go
+import plotly.express as px
+from plotly.subplots import make_subplots
+import numpy as np
+from typing import Dict, List, Optional, Any
+
+import string
+
+def remove_punctuation(text: str):
+    """Remove punctuation"""
+    return text.translate(str.maketrans("", "", string.punctuation))
 
 class MultipleChoiceMetric(BaseMetric[MultipleChoiceAnswer]):
     """Evaluates multiple choice answers with comprehensive per-class metrics."""
@@ -21,11 +37,11 @@ class MultipleChoiceMetric(BaseMetric[MultipleChoiceAnswer]):
         # Question type mappings based on your templates
         self.question_type_mappings = {
             # Temporal Trajectory Questions
-            "_prompt_faster_than_ego": ("motion", "Relative Speed"),
+            "_prompt_faster_than_ego": ("motion", "Ego Relative Speed"),
             "_prompt_moving_towards_ego": ("motion", "Approach/Divergence"),
-            "_prompt_parallel_motion": ("motion", "Approach/Divergence"),
-            "_prompt_approaching_stop_sign": ("motion", "Path Prediction"),
-            "_prompt_vehicle_future_path": ("motion", "Path Prediction"),
+            "_prompt_parallel_motion": ("motion", "Parallel/Perpendicular"),
+            "_prompt_approaching_stop_sign": ("motion", "Approaching Stop Sign"),
+            "_prompt_vehicle_future_path": ("motion", "Ego Collision Prediction"),
             "_prompt_ego_following": ("motion", "Following Behavior"),
             
             # Instance-Referenced Questions (with bounding boxes)
@@ -40,27 +56,33 @@ class MultipleChoiceMetric(BaseMetric[MultipleChoiceAnswer]):
             "_object_movement_direction_type": ("binary", "Movement Direction"),
             # Speed category questions will be detected by pattern matching
         }
+        
+        self.invalid_responses = defaultdict(int)
+        self.invalid_pairs = defaultdict(int)
+        
 
     def _classify_question_type(self, question_name: str) -> tuple:
         """Classify question into main category and subcategory."""
         if question_name in self.question_type_mappings:
             return self.question_type_mappings[question_name]
         
-        # Pattern matching for speed category questions
-        if any(speed_cat in question_name.lower() for speed_cat in 
-               ["stationary", "slow", "medium", "highway", "walking", "jogging", "running"]):
-            return ("binary", "Speed Categories")
-        
-        # Default classification for object presence questions
-        if any(obj_type in question_name.lower() for obj_type in 
-               ["vehicle", "pedestrian", "cyclist", "sign"]):
-            return ("binary", "Object Presence")
-        
         return ("other", "Unknown")
+
+    @staticmethod
+    def compute_text_similarity(text1: str, text2: str) -> float:
+        """
+        Compute simple text similarity between two strings.
+        """
+        # This is a simple implementation - you might want to use a more sophisticated approach
+        text1_tokens = set(text1.lower().split())
+        text2_tokens = set(text2.lower().split())
+        intersection = text1_tokens.intersection(text2_tokens)
+        union = text1_tokens.union(text2_tokens)
+        return len(intersection) / len(union) if union else 0
 
     def evaluate(
         self,
-        prediction: MultipleChoiceAnswer,
+        prediction: Union[MultipleChoiceAnswer, RawTextAnswer],
         ground_truth: MultipleChoiceAnswer,
         question: Union[SingleImageMultipleChoiceQuestion, MultipleImageMultipleChoiceQuestion],
     ) -> Dict[str, Any]:
@@ -71,16 +93,57 @@ class MultipleChoiceMetric(BaseMetric[MultipleChoiceAnswer]):
             Dictionary with evaluation results including validity, correctness,
             predicted and ground truth answers for per-class analysis.
         """
-        assert prediction.choices == ground_truth.choices
+        if isinstance(prediction, MultipleChoiceAnswer):
+            assert prediction.choices == ground_truth.choices
+            choices = prediction.choices
+            is_valid = prediction.answer in choices
+            predicted_answer = prediction.answer if is_valid else None
+            
+        elif isinstance(prediction, RawTextAnswer):
+            choices = ground_truth.choices
+            response_text = prediction.text
+            
+            # First check if it's an exact match (case-insensitive, cleaned)
+            cleaned_response = remove_punctuation(response_text).lower()
+            cleaned_choices = [x.lower() for x in choices]
+            
+            # See which choices are in the response
+            response_contains_choice = {choice: choice in cleaned_response for choice in cleaned_choices}
+            
+            num_choices_present = sum(v for v in response_contains_choice.values())
+            
+            if num_choices_present != 1:
+                self.invalid_responses[cleaned_response] += 1
+                self.invalid_pairs[(question.question, cleaned_response)] += 1
+            
+            if num_choices_present != 1:
+                is_valid = False
+                predicted_answer = cleaned_response
+            elif cleaned_response in cleaned_choices:
+                predicted_answer = choices[cleaned_choices.index(cleaned_response)]
+                is_valid = True
+            else:
+                # Use text similarity as fallback
+                chosen_choice = max(choices, key=lambda x: self.compute_text_similarity(x.lower(), response_text))
+                similarity_score = self.compute_text_similarity(chosen_choice.lower(), response_text)
+                
+                # Set a similarity threshold to determine validity
+                SIMILARITY_THRESHOLD = 0.8  # Adjust as needed
+                if similarity_score >= SIMILARITY_THRESHOLD:
+                    predicted_answer = chosen_choice
+                    is_valid = True
+                else:
+                    predicted_answer = None
+                    is_valid = False
+        else:
+            raise TypeError(f"Prediction should be RawTextAnswer or MultipleChoiceAnswer. Got {type(prediction)}")
 
-        choices = prediction.choices
-        is_valid = prediction.answer in choices
-        is_correct = ground_truth.answer == prediction.answer if is_valid else False
+        is_correct = (ground_truth.answer == predicted_answer) if is_valid else False
 
         return {
             "valid": is_valid,
             "correct": is_correct,
-            "predicted_answer": prediction.answer if is_valid else None,
+            "predicted_answer": predicted_answer,  # None for invalid predictions
             "ground_truth_answer": ground_truth.answer,
             "choices": choices,
             "question_name": question.question_name
@@ -328,16 +391,6 @@ class MultipleChoiceMetric(BaseMetric[MultipleChoiceAnswer]):
         validity_rate = total_valid / total if total > 0 else 0
         accuracy = total_correct / total if total > 0 else 0
 
-        # For overall precision/recall, we treat this as a binary classification problem
-        # where we're predicting "correct" vs "incorrect"
-        precision = total_correct / total_valid if total_valid > 0 else 0
-        recall = total_correct / total if total > 0 else 0
-
-        # Overall F-scores
-        f1 = self._f_score(precision, recall, beta=1.0)
-        f2 = self._f_score(precision, recall, beta=2.0)
-        f0_5 = self._f_score(precision, recall, beta=0.5)
-
         # Per-class metrics
         per_class_metrics = self._calculate_per_class_metrics(metric_results)
         macro_metrics = self._calculate_macro_metrics(per_class_metrics)
@@ -363,11 +416,6 @@ class MultipleChoiceMetric(BaseMetric[MultipleChoiceAnswer]):
             "valid_rate": validity_rate,
             "correct": total_correct,
             "accuracy": accuracy,
-            "precision": precision,
-            "recall": recall,
-            "f1": f1,
-            "f2": f2,
-            "f0.5": f0_5,
             # Per-class metrics
             "per_class_metrics": per_class_metrics,
             "macro_metrics": macro_metrics,
@@ -390,10 +438,10 @@ class MultipleChoiceMetric(BaseMetric[MultipleChoiceAnswer]):
                 else None
             ),
         }
-
+        
     def generate_latex_tables(self, metric_results: List[Dict], model_name: str) -> Dict[str, str]:
         """
-        Generate LaTeX table rows for different question categories.
+        Generate simplified LaTeX table rows for question subtypes.
         
         Arguments:
             metric_results: List of evaluation results from evaluate() method
@@ -405,139 +453,118 @@ class MultipleChoiceMetric(BaseMetric[MultipleChoiceAnswer]):
         if not metric_results:
             return {"error": "No results to generate tables"}
         
-        summary = self.summarise(metric_results)
-        
-        # Group results by question type
-        type_groups = defaultdict(list)
+        # Group results by question type and subtype
         subtype_groups = defaultdict(list)
         
         for result in metric_results:
             main_type, sub_type = self._classify_question_type(result["question_name"])
-            type_groups[main_type].append(result)
             subtype_groups[(main_type, sub_type)].append(result)
         
         tables = {}
         
-        # Overall Performance Table
-        tables["overall"] = self._generate_overall_table_row(summary, model_name)
+        # Generate tables for each main type with subtypes
+        tables["binary"] = self._generate_subtype_table(subtype_groups, "binary", model_name)
+        tables["attribute"] = self._generate_subtype_table(subtype_groups, "attribute", model_name)
+        tables["motion"] = self._generate_subtype_table(subtype_groups, "motion", model_name)
         
-        # Binary Questions Tables (both overall and subtypes)
-        if "binary" in type_groups:
-            tables["binary_overall"] = self._generate_binary_overall_row(type_groups["binary"], model_name)
-            tables["binary_subtypes"] = self._generate_binary_subtype_rows(subtype_groups, model_name)
         
-        # Attribute Questions Tables (both overall and subtypes)
-        if "attribute" in type_groups:
-            tables["attribute_overall"] = self._generate_attribute_overall_row(type_groups["attribute"], model_name)
-            tables["attribute_subtypes"] = self._generate_attribute_subtype_rows(subtype_groups, model_name)
-        
-        # Motion Questions Tables (both overall and subtypes)
-        if "motion" in type_groups:
-            tables["motion_overall"] = self._generate_motion_overall_row(type_groups["motion"], model_name)
-            tables["motion_subtypes"] = self._generate_motion_subtype_rows(subtype_groups, model_name)
+        for key in subtype_groups.keys():
+            main_type, sub_type = key
+            subtype_summary = self.summarise(subtype_groups[key])
+            
+            fig = create_confusion_matrix_plotly(
+                subtype_summary["confusion_matrix"], 
+                question_name=f"{main_type.title()} {sub_type.title()}",
+                normalize='true',  # Normalize by true class
+                show_percentages=True
+            )
+            fig.write_image(f"figures/confmat_{model_name}_{main_type.lower().replace(' ', '')}_{sub_type.lower().replace(' ', '').replace('/', '-')}.png")
         
         return tables
-
-    def _generate_overall_table_row(self, summary: Dict[str, Any], model_name: str) -> str:
-        """Generate overall performance table row."""
-        accuracy = summary["accuracy"] * 100
-        valid_rate = summary["valid_rate"] * 100
-        f1 = summary["f1"]
+    
+    def generate_tables_values(self, metric_results: List[Dict], model_name: str):
+        """
+        Generate simplified LaTeX table rows for question subtypes.
         
-        return f"{model_name} & {accuracy:.1f} & {valid_rate:.1f} & {f1:.2f} \\\\"
-
-    def _generate_binary_overall_row(self, binary_results: List[Dict], model_name: str) -> str:
-        """Generate binary questions overall performance row."""
-        binary_summary = self.summarise(binary_results)
-        accuracy = binary_summary["accuracy"] * 100
-        precision = binary_summary["precision"]
-        recall = binary_summary["recall"]
+        Arguments:
+            metric_results: List of evaluation results from evaluate() method
+            model_name: Name of the model being evaluated
+            
+        Returns:
+            Dictionary containing LaTeX table rows for each table type
+        """
+        if not metric_results:
+            return {"error": "No results to generate tables"}
         
-        return f"{model_name} & {accuracy:.1f} & {precision:.2f} & {recall:.2f} \\\\"
-
-    def _generate_binary_subtype_rows(self, subtype_groups: Dict[tuple, List[Dict]], model_name: str) -> str:
-        """Generate binary questions subtype performance rows."""
+        # Group results by question type and subtype
+        subtype_groups = defaultdict(list)
+        
+        for result in metric_results:
+            main_type, sub_type = self._classify_question_type(result["question_name"])
+            subtype_groups[(main_type, sub_type)].append(result)
+        
+        tables = {}
+        
+        # Generate tables for each main type with subtypes
+        overall_summary = self.summarise(metric_results)
+        precision = overall_summary["macro_metrics"]["macro_precision"] * 100
+        recall = overall_summary["macro_metrics"]["macro_recall"] * 100
+        tables["overall"] = [(model_name, precision, recall)]
+        
+        tables["binary"] = self._generate_subtype_values(subtype_groups, "binary", model_name)
+        tables["attribute"] = self._generate_subtype_values(subtype_groups, "attribute", model_name)
+        tables["motion"] = self._generate_subtype_values(subtype_groups, "motion", model_name)
+        
+        return tables
+    
+    def _generate_subtype_values(self, subtype_groups: Dict[tuple, List[Dict]], 
+                            question_type: str, model_name: str):
+        """Generate subtype performance rows for a given question type."""
         rows = []
         
-        binary_subtypes = [
-            ("Object Presence", ("binary", "Object Presence")),
-            ("Movement Direction", ("binary", "Movement Direction")),
-            ("Speed Categories", ("binary", "Speed Categories")),
-        ]
+        # Get subtypes for this question type
+        subtypes = [key for key in self.question_type_mappings.values() 
+                    if key[0] == question_type]
         
-        for display_name, key in binary_subtypes:
+        for key in subtypes:
             if key in subtype_groups and subtype_groups[key]:
                 subtype_summary = self.summarise(subtype_groups[key])
-                sub_accuracy = subtype_summary["accuracy"] * 100
-                sub_precision = subtype_summary["precision"]
-                sub_recall = subtype_summary["recall"]
-                rows.append(f"{model_name} & {display_name} & {sub_accuracy:.1f} & {sub_precision:.2f} & {sub_recall:.2f} \\\\")
+                precision = subtype_summary["macro_metrics"]["macro_precision"] * 100
+                recall = subtype_summary["macro_metrics"]["macro_recall"] * 100
+                
+                # Get display name
+                _, display_name = key
+                
+                rows.append((model_name, display_name, precision, recall))
         
-        return "\n".join(rows)
+        return rows
 
-    def _generate_attribute_overall_row(self, attribute_results: List[Dict], model_name: str) -> str:
-        """Generate attribute questions overall performance row."""
-        attribute_summary = self.summarise(attribute_results)
-        accuracy = attribute_summary["accuracy"] * 100
-        precision = attribute_summary["precision"]
-        recall = attribute_summary["recall"]
-        
-        return f"{model_name} & {accuracy:.1f} & {precision:.2f} & {recall:.2f} \\\\"
-
-    def _generate_attribute_subtype_rows(self, subtype_groups: Dict[tuple, List[Dict]], model_name: str) -> str:
-        """Generate attribute questions subtype performance rows."""
+    def _generate_subtype_table(self, subtype_groups: Dict[tuple, List[Dict]], 
+                            question_type: str, model_name: str) -> str:
+        """Generate subtype performance rows for a given question type."""
         rows = []
         
-        attribute_subtypes = [
-            ("Object Type", ("attribute", "Object Type")),
-            ("Color", ("attribute", "Color")),
-            ("Orientation", ("attribute", "Orientation")),
-            ("Speed", ("attribute", "Speed")),
-        ]
+        # Get subtypes for this question type
+        subtypes = [key for key in self.question_type_mappings.values() 
+                    if key[0] == question_type]
         
-        for display_name, key in attribute_subtypes:
+        for key in subtypes:
             if key in subtype_groups and subtype_groups[key]:
                 subtype_summary = self.summarise(subtype_groups[key])
-                sub_accuracy = subtype_summary["accuracy"] * 100
-                sub_precision = subtype_summary["precision"]
-                sub_recall = subtype_summary["recall"]
-                rows.append(f"{model_name} & {display_name} & {sub_accuracy:.1f} & {sub_precision:.2f} & {sub_recall:.2f} \\\\")
-        
-        return "\n".join(rows)
-
-    def _generate_motion_overall_row(self, motion_results: List[Dict], model_name: str) -> str:
-        """Generate motion questions overall performance row."""
-        motion_summary = self.summarise(motion_results)
-        accuracy = motion_summary["accuracy"] * 100
-        precision = motion_summary["precision"]
-        recall = motion_summary["recall"]
-        
-        return f"{model_name} & {accuracy:.1f} & {precision:.2f} & {recall:.2f} \\\\"
-
-    def _generate_motion_subtype_rows(self, subtype_groups: Dict[tuple, List[Dict]], model_name: str) -> str:
-        """Generate motion questions subtype performance rows."""
-        rows = []
-        
-        motion_subtypes = [
-            ("Relative Speed", ("motion", "Relative Speed")),
-            ("Approach/Divergence", ("motion", "Approach/Divergence")),
-            ("Path Prediction", ("motion", "Path Prediction")),
-            ("Following Behavior", ("motion", "Following Behavior")),
-        ]
-        
-        for display_name, key in motion_subtypes:
-            if key in subtype_groups and subtype_groups[key]:
-                subtype_summary = self.summarise(subtype_groups[key])
-                sub_accuracy = subtype_summary["accuracy"] * 100
-                sub_precision = subtype_summary["precision"]
-                sub_recall = subtype_summary["recall"]
-                rows.append(f"{model_name} & {display_name} & {sub_accuracy:.1f} & {sub_precision:.2f} & {sub_recall:.2f} \\\\")
+                precision = subtype_summary["macro_metrics"]["macro_precision"] * 100
+                recall = subtype_summary["macro_metrics"]["macro_recall"] * 100
+                
+                # Get display name
+                _, display_name = key
+                
+                
+                rows.append(f"{model_name} & {display_name} & {precision:.1f} & {recall:.1f} \\\\")
         
         return "\n".join(rows)
 
     def print_latex_tables(self, metric_results: List[Dict], model_name: str):
         """
-        Print formatted LaTeX tables ready for copy-paste into paper.
+        Print simplified LaTeX tables ready for copy-paste into paper.
         
         Arguments:
             metric_results: List of evaluation results from evaluate() method
@@ -549,103 +576,62 @@ class MultipleChoiceMetric(BaseMetric[MultipleChoiceAnswer]):
             print(f"Error: {tables['error']}")
             return
         
-        print("=" * 80)
-        print(f"LATEX TABLES FOR MODEL: {model_name}")
-        print("=" * 80)
+        # Table configurations
+        table_configs = [
+            {
+                "key": "binary",
+                "title": "Binary Questions by Subtype",
+                "caption": "Performance on binary characteristic questions by subtype.",
+                "label": "tab:binary_subtypes"
+            },
+            {
+                "key": "attribute", 
+                "title": "Attribute Questions by Subtype",
+                "caption": "Performance on attribute questions by subtype.",
+                "label": "tab:attribute_subtypes"
+            },
+            {
+                "key": "motion",
+                "title": "Motion Questions by Subtype", 
+                "caption": "Performance on motion questions by subtype.",
+                "label": "tab:motion_subtypes"
+            }
+        ]
         
-        if "overall" in tables:
-            print("\n📊 OVERALL PERFORMANCE TABLE ROW:")
-            print("-" * 50)
-            print(tables["overall"])
+        out = ""
         
-        if "binary_overall" in tables:
-            print("\n🔄 BINARY QUESTIONS - OVERALL TABLE ROW:")
-            print("-" * 50)
-            print(tables["binary_overall"])
-        
-        if "binary_subtypes" in tables:
-            print("\n🔄 BINARY QUESTIONS - SUBTYPES TABLE ROWS:")
-            print("-" * 50)
-            print(tables["binary_subtypes"])
-        
-        if "attribute_overall" in tables:
-            print("\n🎯 ATTRIBUTE QUESTIONS - OVERALL TABLE ROW:")
-            print("-" * 50)
-            print(tables["attribute_overall"])
-        
-        if "attribute_subtypes" in tables:
-            print("\n🎯 ATTRIBUTE QUESTIONS - SUBTYPES TABLE ROWS:")
-            print("-" * 50)
-            print(tables["attribute_subtypes"])
-        
-        if "motion_overall" in tables:
-            print("\n🚗 MOTION QUESTIONS - OVERALL TABLE ROW:")
-            print("-" * 50)
-            print(tables["motion_overall"])
-        
-        if "motion_subtypes" in tables:
-            print("\n🚗 MOTION QUESTIONS - SUBTYPES TABLE ROWS:")
-            print("-" * 50)
-            print(tables["motion_subtypes"])
-        
+        # Generate each table
+        for config in table_configs:
+            if config["key"] in tables and tables[config["key"]]:
+                out += f"\n% {config['title']}\n"
+                out += "\\begin{table}[t]\n"
+                out += "\\centering\n"
+                out += f"\\caption{{{config['caption']}}}\n"
+                out += f"\\label{{{config['label']}}}\n"
+                out += "\\adjustbox{width=\\columnwidth,center}{% \n"
+                out += "\\begin{tabular}{llccc}\n"
+                out += "\\toprule\n"
+                # out += "Model & Question Type & Accuracy (\\%) & Precision (\\%) & Recall (\\%) \\\\\n"
+                out += "Model & Question Type & Precision (\\%) & Recall (\\%) \\\\\n"
+                out += "\\midrule\n"
+                out += tables[config["key"]] + "\n"
+                out += "\\bottomrule\n"
+                out += "\\end{tabular}\n"
+                out += "}\n"
+                out += "\\end{table}\n"
+                
         print("\n" + "=" * 80)
-        print("LATEX TABLE TEMPLATES:")
-        print("=" * 80)
-        
-        print("""
-    % Overall Performance Table
-    \\begin{table}[t]
-    \\centering
-    \\caption{Overall performance across all question types.}
-    \\label{tab:overall}
-    \\begin{tabular}{lccc}
-    \\toprule
-    Model & Accuracy (\\%) & Valid Rate (\\%) & F1 Score \\\\
-    \\midrule
-    % Insert overall rows here
-    \\bottomrule
-    \\end{tabular}
-    \\end{table}
-
-    % Binary Questions - Overall
-    \\begin{table}[t]
-    \\centering
-    \\caption{Performance on binary characteristic questions.}
-    \\label{tab:binary_overall}
-    \\begin{tabular}{lccc}
-    \\toprule
-    Model & Accuracy (\\%) & Precision & Recall \\\\
-    \\midrule
-    % Insert binary_overall rows here
-    \\bottomrule
-    \\end{tabular}
-    \\end{table}
-
-    % Binary Questions - By Subtype
-    \\begin{table}[t]
-    \\centering
-    \\caption{Performance on binary characteristic questions by subtype.}
-    \\label{tab:binary_subtypes}
-    \\begin{tabular}{llccc}
-    \\toprule
-    Model & Question Type & Accuracy (\\%) & Precision & Recall \\\\
-    \\midrule
-    % Insert binary_subtypes rows here
-    \\bottomrule
-    \\end{tabular}
-    \\end{table}
-    """)
-        
-        print("Copy the rows above and paste them into your LaTeX tables!")
+        print("Simplified tables are ready to copy-paste into your LaTeX document!")
         print("=" * 80)
 
-    def save_latex_tables(self, metric_results: List[Dict], model_name: str, save_path):
+    def save_latex_tables(self, metric_results: List[Dict], model_name: str, save_path: str):
         """
-        Print formatted LaTeX tables ready for copy-paste into paper.
+        Save simplified LaTeX tables to file.
         
         Arguments:
             metric_results: List of evaluation results from evaluate() method
             model_name: Name of the model being evaluated
+            save_path: Path to save the LaTeX tables
         """
         tables = self.generate_latex_tables(metric_results, model_name)
         
@@ -654,96 +640,52 @@ class MultipleChoiceMetric(BaseMetric[MultipleChoiceAnswer]):
             return
         
         out = ""
-
-        out += ("=" * 80)
-        out += (f"LATEX TABLES FOR MODEL: {model_name}")
-        out += ("=" * 80)
         
-        if "overall" in tables:
-            out += ("\n📊 OVERALL PERFORMANCE TABLE ROW:")
-            out += ("-" * 50)
-            out += (tables["overall"])
+        # Table configurations
+        table_configs = [
+            {
+                "key": "binary",
+                "title": "Binary Questions by Subtype",
+                "caption": "Performance on binary characteristic questions by subtype.",
+                "label": "tab:binary_subtypes"
+            },
+            {
+                "key": "attribute", 
+                "title": "Attribute Questions by Subtype",
+                "caption": "Performance on attribute questions by subtype.",
+                "label": "tab:attribute_subtypes"
+            },
+            {
+                "key": "motion",
+                "title": "Motion Questions by Subtype", 
+                "caption": "Performance on motion questions by subtype.",
+                "label": "tab:motion_subtypes"
+            }
+        ]
         
-        if "binary_overall" in tables:
-            out += ("\n🔄 BINARY QUESTIONS - OVERALL TABLE ROW:")
-            out += ("-" * 50)
-            out += (tables["binary_overall"])
+        # Generate each table
+        for config in table_configs:
+            if config["key"] in tables and tables[config["key"]]:
+                out += f"\n% {config['title']}\n"
+                out += "\\begin{table}[t]\n"
+                out += "\\centering\n"
+                out += f"\\caption{{{config['caption']}}}\n"
+                out += f"\\label{{{config['label']}}}\n"
+                out += "\\begin{tabular}{llccc}\n"
+                out += "\\toprule\n"
+                # out += "Model & Question Type & Accuracy (\\%) & Precision (\\%) & Recall (\\%) \\\\\n"
+                out += "Model & Question Type & Precision (\\%) & Recall (\\%) \\\\\n"
+                out += "\\midrule\n"
+                out += tables[config["key"]] + "\n"
+                out += "\\bottomrule\n"
+                out += "\\end{tabular}\n"
+                out += "\\end{table}\n"
         
-        if "binary_subtypes" in tables:
-            out += ("\n🔄 BINARY QUESTIONS - SUBTYPES TABLE ROWS:")
-            out += ("-" * 50)
-            out += (tables["binary_subtypes"])
+        out += "\n" + "=" * 80 + "\n"
+        out += "Simplified tables are ready to copy-paste into your LaTeX document!\n" 
+        out += "=" * 80 + "\n"
         
-        if "attribute_overall" in tables:
-            out += ("\n🎯 ATTRIBUTE QUESTIONS - OVERALL TABLE ROW:")
-            out += ("-" * 50)
-            out += (tables["attribute_overall"])
-        
-        if "attribute_subtypes" in tables:
-            out += ("\n🎯 ATTRIBUTE QUESTIONS - SUBTYPES TABLE ROWS:")
-            out += ("-" * 50)
-            out += (tables["attribute_subtypes"])
-        
-        if "motion_overall" in tables:
-            out += ("\n🚗 MOTION QUESTIONS - OVERALL TABLE ROW:")
-            out += ("-" * 50)
-            out += (tables["motion_overall"])
-        
-        if "motion_subtypes" in tables:
-            out += ("\n🚗 MOTION QUESTIONS - SUBTYPES TABLE ROWS:")
-            out += ("-" * 50)
-            out += (tables["motion_subtypes"])
-        
-        out += ("\n" + "=" * 80)
-        out += ("LATEX TABLE TEMPLATES:")
-        out += ("=" * 80)
-        
-        out += ("""
-    % Overall Performance Table
-    \\begin{table}[t]
-    \\centering
-    \\caption{Overall performance across all question types.}
-    \\label{tab:overall}
-    \\begin{tabular}{lccc}
-    \\toprule
-    Model & Accuracy (\\%) & Valid Rate (\\%) & F1 Score \\\\
-    \\midrule
-    % Insert overall rows here
-    \\bottomrule
-    \\end{tabular}
-    \\end{table}
-
-    % Binary Questions - Overall
-    \\begin{table}[t]
-    \\centering
-    \\caption{Performance on binary characteristic questions.}
-    \\label{tab:binary_overall}
-    \\begin{tabular}{lccc}
-    \\toprule
-    Model & Accuracy (\\%) & Precision & Recall \\\\
-    \\midrule
-    % Insert binary_overall rows here
-    \\bottomrule
-    \\end{tabular}
-    \\end{table}
-
-    % Binary Questions - By Subtype
-    \\begin{table}[t]
-    \\centering
-    \\caption{Performance on binary characteristic questions by subtype.}
-    \\label{tab:binary_subtypes}
-    \\begin{tabular}{llccc}
-    \\toprule
-    Model & Question Type & Accuracy (\\%) & Precision & Recall \\\\
-    \\midrule
-    % Insert binary_subtypes rows here
-    \\bottomrule
-    \\end{tabular}
-    \\end{table}
-    """)
-        
-        out += ("Copy the rows above and paste them into your LaTeX tables!")
-        out += ("=" * 80)
-
         with open(save_path, 'w') as f:
             f.write(out)
+        
+        print(f"LaTeX tables saved to: {save_path}")
