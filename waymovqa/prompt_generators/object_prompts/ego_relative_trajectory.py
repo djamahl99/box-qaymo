@@ -2118,6 +2118,7 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
             if ego_positions is not None
             else np.zeros((0, 3), dtype=float)
         )
+
         obj1_desc = obj.get_object_description()
         obj2_desc = "Ego Vehicle"
 
@@ -2140,7 +2141,7 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
                     color=time_colors,
                     colorscale="Viridis",
                     width=6,
-                    colorbar=dict(title="Time Progress"),
+                    # colorbar=dict(title="Time Progress"),
                 ),
                 marker=dict(size=4, opacity=0.8),
                 name=obj1_desc,
@@ -2220,14 +2221,37 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
                 )
             )
 
-        # Update 3D layout
+
+        # Get the current position of traj1 at the specified timestamp
+        current_pos = traj1[timestamp_idx]
+        center_x = current_pos[0]
+        center_y = current_pos[1]
+        center_z = current_pos[2] if traj1.shape[1] > 2 else 0
+        
+        traj1_mins = traj1.min(axis=0)
+        traj1_maxes = traj1.max(axis=0)
+        traj2_mins = traj2.min(axis=0)
+        traj2_maxes = traj2.max(axis=0)
+        print('traj1_mins', traj1_mins, traj2_mins)
+
+        # Update 3D layout with centered view
         fig_3d.update_layout(
             scene=dict(
-                xaxis_title="X (m)",
-                yaxis_title="Y (m)",
-                zaxis_title="Z (m)",
+                xaxis=dict(
+                    title="X (m)",
+                    range=[center_x - 5, center_x + 5]
+                ),
+                yaxis=dict(
+                    title="Y (m)", 
+                    range=[center_y - 5, center_y + 5]
+                ),
+                zaxis=dict(
+                    title="Z (m)",
+                    range=[center_z - 5, center_z + 5]
+                ),
                 camera=dict(eye=dict(x=1.5, y=1.5, z=1.5)),
-                aspectmode="cube",
+                aspectmode="manual",
+                aspectratio=dict(x=1, y=1, z=0.2)  # This maintains the 50:50:10 ratio visually
             ),
             title=dict(
                 text=f"3D Trajectory Analysis - {obj1_desc}", x=0.5, font=dict(size=20)
@@ -2257,6 +2281,159 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
             ],
         )
 
+        fig_bev = go.Figure()
+
+        # Create color scales for time progression
+        n_points = len(traj1)
+        time_colors = np.linspace(0, 1, n_points)
+
+        # Object trajectory - using 2D Scatter for BEV
+        fig_bev.add_trace(
+            go.Scatter(
+                x=traj1[:, 0],
+                y=traj1[:, 1],
+                mode="lines+markers",
+                line=dict(
+                    color='green',
+                    width=6,
+                ),
+                marker=dict(
+                    size=4, 
+                    opacity=0.8,
+                    color='green',
+                ),
+                name=obj1_desc,
+                hovertemplate=(
+                    f"<b>{obj1_desc}</b><br>"
+                    "Position: (%{x:.2f}, %{y:.2f})<br>"
+                    "Time: %{text}<br>"
+                    "<extra></extra>"
+                ),
+                text=[f"t={t:.2f}s" for t in timestamps],
+            )
+        )
+
+        # Ego trajectory - using 2D Scatter for BEV
+        fig_bev.add_trace(
+            go.Scatter(
+                x=traj2[:, 0],
+                y=traj2[:, 1],
+                mode="lines+markers",
+                line=dict(
+                    color='red', 
+                    width=6
+                ),
+                marker=dict(
+                    size=4, 
+                    opacity=0.8,
+                    color='red',
+                ),
+                name=obj2_desc,
+                hovertemplate=(
+                    f"<b>{obj2_desc}</b><br>"
+                    "Position: (%{x:.2f}, %{y:.2f})<br>"
+                    "Time: %{text}<br>"
+                    "<extra></extra>"
+                ),
+                text=[f"t={t:.2f}s" for t in timestamps],
+            )
+        )
+
+        # Add waypoints
+        waypoints = [
+            (0, "start", "circle", ["green", "red"]),
+            (timestamp_idx, "current", "diamond", ["blue", "orange"]),
+            (-1, "end", "square", ["darkgreen", "darkred"]),
+        ]
+
+        for idx, label, symbol, colors in waypoints:
+            # Object waypoint
+            fig_bev.add_trace(
+                go.Scatter(
+                    x=[traj1[idx, 0]],
+                    y=[traj1[idx, 1]],
+                    mode="markers",
+                    marker=dict(
+                        size=12,
+                        color=colors[0],
+                        symbol=symbol,
+                        line=dict(width=2, color="white"),
+                    ),
+                    name=f"{obj1_desc} ({label})",
+                    showlegend=True,
+                    hovertemplate=f"<b>{obj1_desc} ({label})</b><br>Time: {timestamps[idx]:.2f}s<extra></extra>",
+                )
+            )
+
+            # Ego waypoint
+            fig_bev.add_trace(
+                go.Scatter(
+                    x=[traj2[idx, 0]],
+                    y=[traj2[idx, 1]],
+                    mode="markers",
+                    marker=dict(
+                        size=12,
+                        color=colors[1],
+                        symbol=symbol,
+                        line=dict(width=2, color="white"),
+                    ),
+                    name=f"{obj2_desc} ({label})",
+                    showlegend=True,
+                    hovertemplate=f"<b>{obj2_desc} ({label})</b><br>Time: {timestamps[idx]:.2f}s<extra></extra>",
+                )
+            )
+
+        # Get the current position of traj1 at the specified timestamp
+        current_pos = traj1[timestamp_idx]
+        center_x = current_pos[0]
+        center_y = current_pos[1]
+
+        # Update layout for Bird's Eye View (2D plot)
+        fig_bev.update_layout(
+            xaxis=dict(
+                title="X (m)",
+                range=[center_x - 25, center_x + 25],
+                scaleanchor="y",  # This ensures equal scaling between x and y axes
+                scaleratio=1,
+            ),
+            yaxis=dict(
+                title="Y (m)", 
+                range=[center_y - 25, center_y + 25],
+            ),
+            title=dict(
+                text=f"Bird's Eye View - {obj1_desc}", x=0.5, font=dict(size=20)
+            ),
+            height=600,
+            width=600,  # Square aspect ratio for BEV
+            showlegend=True,
+            annotations=[
+                dict(
+                    text=(
+                        f"<b>Scene Metadata</b><br>"
+                        f"Scene ID: {obj.scene_id}<br>"
+                        f"Timestamp: {frame.timestamp:.2f}s<br>"
+                        f"Camera: {camera.name}<br>"
+                        f"Question: {question_txt}<br>"
+                        f"Answer: {answer_txt}"
+                    ),
+                    showarrow=False,
+                    xref="paper",
+                    yref="paper",
+                    x=0.02,
+                    y=0.98,
+                    bgcolor="rgba(255,255,255,0.9)",
+                    bordercolor="gray",
+                    borderwidth=1,
+                    font=dict(size=10),
+                )
+            ],
+            # Add grid for better spatial reference
+            plot_bgcolor="white",
+            xaxis_showgrid=True,
+            yaxis_showgrid=True,
+            xaxis_gridcolor="lightgray",
+            yaxis_gridcolor="lightgray",
+        )
         # === TIMELINE PLOT ===
 
         fig_timeline = go.Figure()
@@ -2485,6 +2662,7 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
 
         figures = {
             "3d_trajectory": fig_3d,
+            "bev": fig_bev,
             "timeline": fig_timeline,
             "camera_view": fig_camera,
         }
@@ -2536,6 +2714,9 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
                 # Save individual plots as images
                 fig_3d.write_image(
                     f"{base_path}_3d.png", width=1200, height=800, scale=2
+                )
+                fig_bev.write_image(
+                    f"{base_path}_bev.png", width=1200, height=1200, scale=2
                 )
                 fig_timeline.write_image(
                     f"{base_path}_timeline.png", width=1200, height=600, scale=2
@@ -2606,11 +2787,12 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
             question_txt = question_obj.question
             answer_txt = answer_obj.answer
 
-            extra_text = (
-                f"<br>Prediction: {pred_answer_obj.answer}"
-                if isinstance(pred_answer_obj, MultipleChoiceAnswer)
-                else f"<br>Raw Prediction: {pred_answer_obj.pred_answer_obj}"
-            )
+            if pred_answer_obj is not None:
+                extra_text = (
+                    f"<br>Prediction: {pred_answer_obj.answer}"
+                    if isinstance(pred_answer_obj, MultipleChoiceAnswer)
+                    else f"<br>Raw Prediction: {pred_answer_obj.get_answer_text()}"
+                )
 
             self.visualize_trajectories_plotly(
                 object_id,
