@@ -63,10 +63,14 @@ import cv2
 
 
 def load_image(image_path, bbox=None, draw_bbox=True):
-    if not draw_bbox:
-        print("not draw_bbox")
-        return Image.open(image_path)
+    new_images_path = os.environ.get('WAYMO_CAMERA_IMAGES_PATH')
 
+    if new_images_path is not None:
+        image_path = str(Path(new_images_path) / Path(image_path).name)
+    
+    if not draw_bbox:
+        return Image.open(image_path)
+    
     img_vis = cv2.imread(image_path)
     img_vis = cv2.cvtColor(img_vis, cv2.COLOR_BGR2RGB)
 
@@ -75,8 +79,9 @@ def load_image(image_path, bbox=None, draw_bbox=True):
         cv2.rectangle(img_vis, (x1, y1), (x2, y2), (255, 0, 0), 6)
 
     # Convert back to PIL Image to match original function
-    pil_img = Image.fromarray(img_vis)
+    pil_img =  Image.fromarray(img_vis)
 
+        
     return pil_img
 
 

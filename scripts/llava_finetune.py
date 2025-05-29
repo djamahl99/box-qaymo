@@ -72,7 +72,6 @@ class VQATrainingDataset(Dataset):
     def load_image(self, image_path, bbox=None):
         """Load and process image, optionally with bounding box"""
         image_path = self.camera_images_path / Path(image_path).name
-        print('image_path', image_path)
         if not image_path.exists():
             exit()
         img_vis = cv2.imread(str(image_path))
@@ -251,6 +250,24 @@ def collate_fn(batch):
     }
 
 
+@dataclass
+class TrainingConfig:
+    """Training configuration"""
+    dataset_path: str
+    vqa_path: str
+    output_dir: str = "./llava_finetuned"
+    model_name: str = "liuhaotian/llava-v1.5-7b"
+    train_split: float = 0.8
+    batch_size: int = 2
+    learning_rate: float = 2e-5
+    num_epochs: int = 3
+    max_grad_norm: float = 1.0
+    save_steps: int = 500
+    eval_steps: int = 500
+    warmup_steps: int = 100
+    conv_mode: str = "llava_v1"
+    load_4bit: bool = False  # Set to False to avoid quantization issues
+    device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 def train_model_lora(config: TrainingConfig):
@@ -413,6 +430,11 @@ def train_model_lora(config: TrainingConfig):
                     images=images
                 )
                 loss = outputs.loss
+                print('input_ids', input_ids.shape, input_ids.min(), input_ids.max(), input_ids.dtype)
+                print('attention_mask', attention_mask.shape, attention_mask.min(), attention_mask.max(), attention_mask.dtype)
+                print('labels', labels.shape, labels.min(), labels.max(), labels.dtype)
+                print('images', images.shape, images.min(), images.max(), images.dtype)
+                print('loss', loss)
             
             # Backward pass
             optimizer.zero_grad()
@@ -527,46 +549,45 @@ def load_lora_model(base_model_path, lora_adapter_path, device='cuda'):
     return tokenizer, model, image_processor, context_len
 
 # Example usage and configuration
-class LoRATrainingConfig:
+class LoRATrainingConfig(TrainingConfig):
     """Extended config class for LoRA training"""
-    def __init__(self):
-        # Base training config
-        self.vqa_path = "path/to/vqa/dataset"
-        self.dataset_path = "path/to/images"
-        self.output_dir = "output/lora_training"
-        self.model_name = "liuhaotian/llava-v1.5-7b"
-        
-        # Training parameters
-        self.batch_size = 4
-        self.learning_rate = 2e-4
-        self.num_epochs = 3
-        self.warmup_steps = 100
-        self.save_steps = 500
-        self.max_grad_norm = 1.0
-        self.train_split = 0.9
-        self.conv_mode = "llava_v1"
-        
-        # Device settings
-        self.device = "cuda"
-        self.load_4bit = True  # Use 4-bit quantization to save memory
-        
-        # LoRA specific parameters
-        self.lora_r = 16  # Rank of adaptation
-        self.lora_alpha = 32  # LoRA scaling parameter
-        self.lora_dropout = 0.1  # LoRA dropout
-        self.lora_learning_rate = 2e-4  # Can be different from base LR
-        
-        # Target modules for LoRA (adjust based on your model architecture)
-        self.lora_target_modules = [
-            "q_proj", "v_proj", "k_proj", "o_proj",  # Attention layers
-            "gate_proj", "up_proj", "down_proj"      # MLP layers
-        ]
-        
-        # Modules to save completely (not as LoRA)
-        self.modules_to_save = ["lm_head", "embed_tokens"]
-        
-        # Evaluation
-        self.eval_steps = 1  # Evaluate every N epochs
+    # Base training config
+    vqa_path = "path/to/vqa/dataset"
+    dataset_path = "path/to/images"
+    output_dir = "output/lora_training"
+    model_name = "liuhaotian/llava-v1.5-7b"
+    
+    # Training parameters
+    batch_size = 4
+    learning_rate = 2e-4
+    num_epochs = 3
+    warmup_steps = 100
+    save_steps = 500
+    max_grad_norm = 1.0
+    train_split = 0.9
+    conv_mode = "llava_v1"
+    
+    # Device settings
+    device = "cuda"
+    load_4bit = True  # Use 4-bit quantization to save memory
+    
+    # LoRA specific parameters
+    lora_r = 16  # Rank of adaptation
+    lora_alpha = 32  # LoRA scaling parameter
+    lora_dropout = 0.1  # LoRA dropout
+    lora_learning_rate = 2e-4  # Can be different from base LR
+    
+    # Target modules for LoRA (adjust based on your model architecture)
+    lora_target_modules = [
+        "q_proj", "v_proj", "k_proj", "o_proj",  # Attention layers
+        "gate_proj", "up_proj", "down_proj"      # MLP layers
+    ]
+    
+    # Modules to save completely (not as LoRA)
+    modules_to_save = ["lm_head", "embed_tokens"]
+    
+    # Evaluation
+    eval_steps = 1  # Evaluate every N epochs
 
 def main():
     import argparse

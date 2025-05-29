@@ -6,3 +6,4 @@ data/meta.json
 *.pyc
 
 figures/
+wandb/

@@ -24,6 +24,7 @@ from waymovqa.questions.single_image_multi_choice import SingleBase64ImageMultip
 from waymovqa.questions.single_image_multi_choice import SingleImageMultipleChoiceQuestion
 from waymovqa.questions.multi_image import MultipleImageQuestion
 from waymovqa.questions.multi_image_multi_choice import MultipleImageMultipleChoiceQuestion
+from waymovqa.questions.multi_frame_multi_choice import MultipleFrameMultipleChoiceQuestion
 
 from transformers import AutoTokenizer
 import torch
@@ -48,6 +49,22 @@ from pathlib import Path
 from typing import List, Union
 import gc
 
+
+def load_image(image_path, bbox=None, draw_bbox=True):
+    """Load and optionally draw bbox on image"""
+    if not draw_bbox or bbox is None:
+        return Image.open(image_path)
+
+    img_vis = cv2.imread(str(image_path))
+    img_vis = cv2.cvtColor(img_vis, cv2.COLOR_BGR2RGB)
+
+    if bbox is not None:
+        x1, y1, x2, y2 = bbox
+        cv2.rectangle(img_vis, (x1, y1), (x2, y2), (255, 0, 0), 6)
+
+    # Convert back to PIL Image to match original function
+    pil_img = Image.fromarray(img_vis)
+    return pil_img
 
 
 def format_options(choices: List[str]):
@@ -80,6 +97,10 @@ def get_prompt(question: BaseQuestion, gt_answer: BaseAnswer) -> str:
 
         choices = gt_answer.choices
         extra_text = f"Focus on the {best_camera_name.lower().replace('_', '')} camera."
+    elif isinstance(question, MultipleFrameMultipleChoiceQuestion) and isinstance(
+        gt_answer, MultipleChoiceAnswer
+    ):
+        choices = gt_answer.choices
     else:
         raise TypeError(f"question->{type(question)} answer->{type(gt_answer)}")
 
@@ -88,6 +109,7 @@ def get_prompt(question: BaseQuestion, gt_answer: BaseAnswer) -> str:
     prompt += extra_text
 
     return prompt
+
 
 def run_on_dataset(
     gt_dataset,  # VQADataset type
@@ -132,19 +154,41 @@ def run_on_dataset(
         question = sample.question
         gt_answer = sample.answer
         
-        bbox = None
-        if isinstance(question.data, dict) and "bbox" in question.data:
-            bbox = question.data['bbox']
-
-        if isinstance(question, SingleImageMultipleChoiceQuestion):
-            image_path = str(dataset_path / question.image_path)
-            
+        # Handle different question types
+        if isinstance(question, MultipleFrameMultipleChoiceQuestion):
+            # Process multiframe questions
             prompt = get_prompt(question, gt_answer)
+            
+            image_paths = [
+                str(dataset_path / question.previous_image_path), 
+                str(dataset_path / question.current_image_path)
+            ]
+            bboxes = [question.previous_bbox, question.current_bbox]
+            
+            pred_answer_text = process_multiframe_sample(
+                prompt, image_paths, bboxes, model, tokenizer, args, draw_bbox
+            )
+            
+        elif isinstance(question, SingleImageMultipleChoiceQuestion):
+            image_path = str(dataset_path / question.image_path)
+            prompt = get_prompt(question, gt_answer)
+            
+            bbox = None
+            if isinstance(question.data, dict) and "bbox" in question.data:
+                bbox = question.data['bbox']
+            
+            pred_answer_text = process_single_sample(
+                prompt, image_path, bbox, model, tokenizer, args, draw_bbox
+            )
 
         elif isinstance(question, SingleImageQuestion) and isinstance(
             gt_answer, MultipleChoiceAnswer
         ):
             prompt = get_prompt(question, gt_answer)
+            # Handle single image questions without explicit image path
+            pred_answer_text = process_single_sample(
+                prompt, None, None, model, tokenizer, args, draw_bbox
+            )
 
         elif isinstance(question, MultipleImageMultipleChoiceQuestion):
             best_camera_name = "FRONT"
@@ -152,10 +196,16 @@ def run_on_dataset(
                 best_camera_name = question.data['best_camera_name']
                 
             cam_idx = next((i for i, cam_name in enumerate(question.camera_names) if cam_name == best_camera_name), 0)
-            
-            image_path = question.image_paths[cam_idx]
-            
+            image_path = str(dataset_path / question.image_paths[cam_idx])
             prompt = get_prompt(question, gt_answer)
+            
+            bbox = None
+            if isinstance(question.data, dict) and "bbox" in question.data:
+                bbox = question.data['bbox']
+            
+            pred_answer_text = process_single_sample(
+                prompt, image_path, bbox, model, tokenizer, args, draw_bbox
+            )
 
         elif isinstance(question, MultipleImageQuestion) and isinstance(gt_answer, MultipleChoiceAnswer):
             best_camera_name = "FRONT"
@@ -163,66 +213,25 @@ def run_on_dataset(
                 best_camera_name = question.data['best_camera_name']
                 
             cam_idx = next((i for i, cam_name in enumerate(question.camera_names) if cam_name == best_camera_name), 0)
-            
-            image_path = question.image_paths[cam_idx]
-            
+            image_path = str(dataset_path / question.image_paths[cam_idx])
             prompt = get_prompt(question, gt_answer)
             
-            # Get all relevant attributes from the original question
-            attr_names = ['image_path', 'question', 'choices', 'scene_id', 'timestamp', 'camera_name', 'generator_name', 'data', 'question_id', 'question_name']
-            attrs = {name: getattr(question, name) for name in attr_names if hasattr(question, name)}
+            bbox = None
+            if isinstance(question.data, dict) and "bbox" in question.data:
+                bbox = question.data['bbox']
             
-            # Override with answer choices
-            attrs['choices'] = gt_answer.choices
-            attrs['image_path'] = image_path
-            attrs['camera_name'] = best_camera_name
+            pred_answer_text = process_single_sample(
+                prompt, image_path, bbox, model, tokenizer, args, draw_bbox
+            )
             
-            question = SingleImageMultipleChoiceQuestion(**attrs)
         else:
-            print(question)
+            print(f"Unsupported question type: {type(question)}")
             raise TypeError(
                 f"Question type {question.__class__.__name__} not valid for this model"
             )
-            
-        camera_images_path = dataset_path / "camera_images"
-        image_path = camera_images_path / Path(image_path).name
-        
-        assert image_path.exists(), f'image_path={image_path} doesnt exist'
-            
-        if bbox is not None:
-            img_vis = cv2.imread(image_path)
-            img_vis = cv2.cvtColor(img_vis, cv2.COLOR_BGR2RGB)
-
-            if bbox is not None and draw_bbox:
-                x1, y1, x2, y2 = bbox
-                cv2.rectangle(img_vis, (x1, y1), (x2, y2), (255, 0, 0), 6)
-                
-
-            # Convert back to PIL Image to match original function
-            pil_img =  Image.fromarray(img_vis)
-                
-            image_path = './box_drawn.jpg'
-            pil_img.save(image_path)
-            
-        if not Path(image_path).exists():
-            print('image_path doesnt exist', image_path)
-            exit()
-            
-        pred_answer_text = process_single_sample(
-            prompt, str(image_path), model, tokenizer, args
-        )
         
         # Create prediction answer
-        # pred_answer = MultipleChoiceAnswer(
-        #     choices=question.choices,
-        #     answer=parse_multiple_choice_response(pred_answer_text, question.choices)
-        # )
-        
-        # Create prediction answer
-        pred_answer = RawTextAnswer(
-            text=pred_answer_text
-        )
-        
+        pred_answer = RawTextAnswer(text=pred_answer_text)
         pred_dataset.add_sample(question, pred_answer)
         
         # Progress tracking
@@ -241,42 +250,136 @@ def run_on_dataset(
     return pred_dataset
 
 
-def process_single_sample(prompt, image_path, model, tokenizer, args):
+def process_multiframe_sample(prompt, image_paths, bboxes, model, tokenizer, args, draw_bbox=True):
+    """
+    Process a multiframe sample with Qwen-VL.
+    
+    Args:
+        prompt: Text prompt
+        image_paths: List of image paths
+        bboxes: List of bounding boxes (can contain None values)
+        model: Qwen-VL model
+        tokenizer: Qwen-VL tokenizer
+        args: Configuration arguments
+        draw_bbox: Whether to draw bounding boxes
+    
+    Returns:
+        Generated response text
+    """
+    # Process images with bboxes if needed
+    processed_images = []
+    temp_image_paths = []
+    
+    dataset_path = Path("/scratch/user/uqdetche/waymo_vqa_dataset/camera_images/")
+    
+    for i, (image_path, bbox) in enumerate(zip(image_paths, bboxes)):
+        image_path = str(dataset_path / Path(image_path).name)
+        
+        assert Path(image_path).exists():
+            
+        if bbox is not None and draw_bbox:
+            # Create image with bbox drawn
+            img_with_bbox = load_image(image_path, bbox, draw_bbox=True)
+            temp_path = f'./temp_bbox_{i}.jpg'
+            img_with_bbox.save(temp_path)
+            temp_image_paths.append(temp_path)
+            processed_images.append(temp_path)
+        else:
+            processed_images.append(image_path)
+    
+    if not processed_images:
+        raise ValueError("No valid images found for multiframe question")
+    
+    try:
+        # Prepare the query with multiple images
+        query_list = []
+        
+        # Add images first
+        for img_path in processed_images:
+            query_list.append({'image': img_path})
+        
+        # Add the text prompt
+        query_list.append({'text': prompt})
+        
+        query = tokenizer.from_list_format(query_list)
+        
+        # Generate response
+        with torch.inference_mode():
+            response, history = model.chat(
+                tokenizer, 
+                query, 
+                history=None,
+                temperature=getattr(args, 'temperature', 0.2),
+                max_new_tokens=getattr(args, 'max_new_tokens', 512),
+                do_sample=getattr(args, 'do_sample', True),
+            )
+        
+        return response
+        
+    finally:
+        # Clean up temporary files
+        for temp_path in temp_image_paths:
+            if Path(temp_path).exists():
+                os.remove(temp_path)
+
+
+def process_single_sample(prompt, image_path, bbox, model, tokenizer, args, draw_bbox=True):
     """
     Process a single sample with Qwen-VL.
     
     Args:
         prompt: Text prompt
         image_path: Path to image (can be None)
+        bbox: Bounding box (can be None)
         model: Qwen-VL model
         tokenizer: Qwen-VL tokenizer
         args: Configuration arguments
+        draw_bbox: Whether to draw bounding boxes
     
     Returns:
         Generated response text
     """
-    # Prepare the query
-    if image_path is not None and Path(image_path).exists():
-        query = tokenizer.from_list_format([
-            {'image': image_path},
-            {'text': prompt},
-        ])
-    else:
-        query = prompt
+    temp_path = None
     
-    # Generate response
-    with torch.inference_mode():
-        response, history = model.chat(
-            tokenizer, 
-            query, 
-            history=None,
-            temperature=getattr(args, 'temperature', 0.2),
-            max_new_tokens=getattr(args, 'max_new_tokens', 512),
-            do_sample=getattr(args, 'do_sample', True),
-        )
-    
-    return response
+    try:
+        # Handle image processing
+        if image_path is not None and Path(image_path).exists():
+            # Check if we need to draw bbox
+            if bbox is not None and draw_bbox:
+                img_with_bbox = load_image(image_path, bbox, draw_bbox=True)
+                temp_path = './temp_single_bbox.jpg'
+                img_with_bbox.save(temp_path)
+                final_image_path = temp_path
+            else:
+                final_image_path = image_path
+            
+            # Prepare the query with image
+            query = tokenizer.from_list_format([
+                {'image': final_image_path},
+                {'text': prompt},
+            ])
+        else:
+            # Text-only query
+            query = prompt
         
+        # Generate response
+        with torch.inference_mode():
+            response, history = model.chat(
+                tokenizer, 
+                query, 
+                history=None,
+                temperature=getattr(args, 'temperature', 0.2),
+                max_new_tokens=getattr(args, 'max_new_tokens', 512),
+                do_sample=getattr(args, 'do_sample', True),
+            )
+        
+        return response
+        
+    finally:
+        # Clean up temporary file
+        if temp_path and Path(temp_path).exists():
+            os.remove(temp_path)
+
 
 def create_args_for_qwen(model_path="Qwen/Qwen-VL-Chat", **kwargs):
     """
@@ -304,9 +407,10 @@ def create_args_for_qwen(model_path="Qwen/Qwen-VL-Chat", **kwargs):
     
     return Namespace(**default_args)
 
+
 def parse_multiple_choice_response(response: str, choices: List[str]) -> str:
     """
-    Parse the LLaVA response to extract the chosen answer for multiple choice questions.
+    Parse the response to extract the chosen answer for multiple choice questions.
     """
     response = response.lower().strip()
     normalized_choices = [choice.lower() for choice in choices]
@@ -331,17 +435,13 @@ def parse_multiple_choice_response(response: str, choices: List[str]) -> str:
             return choices[i]
 
     # Fallback to similarity for truly ambiguous cases
-    if compute_text_similarity:  # Assuming this function exists
-        return max(choices, key=lambda x: compute_text_similarity(x.lower(), response))
-
-    return "AMBIGUOUS_RESPONSE"
+    return max(choices, key=lambda x: compute_text_similarity(x.lower(), response))
 
 
 def compute_text_similarity(text1: str, text2: str) -> float:
     """
     Compute simple text similarity between two strings.
     """
-    # This is a simple implementation - you might want to use a more sophisticated approach
     text1_tokens = set(text1.lower().split())
     text2_tokens = set(text2.lower().split())
     intersection = text1_tokens.intersection(text2_tokens)
@@ -352,7 +452,7 @@ def compute_text_similarity(text1: str, text2: str) -> float:
 def main():
     import argparse
 
-    parser = argparse.ArgumentParser(description="Run LLAVA on VQA questions")
+    parser = argparse.ArgumentParser(description="Run Qwen-VL on VQA questions")
     parser.add_argument(
         "--dataset_path",
         type=str,
@@ -372,14 +472,14 @@ def main():
         "--save_suffix",
         type=str,
         required=False,
-        help="save_path suffix when running on mutple questions",
+        help="save_path suffix when running on multiple questions",
     )
     parser.add_argument(
         "--data_save_prefix",
         type=str,
         required=False,
         default="26_05_2025_export",
-        help="save_path suffix when running on mutple questions",
+        help="save_path suffix when running on multiple questions",
     )
     parser.add_argument(
         "--model_path",
@@ -404,8 +504,6 @@ def main():
 
     args = parser.parse_args()
 
-
-    
     if args.save_path is not None and args.vqa_path is not None and len(args.save_path) > 0 and len(args.vqa_path) > 0:
         gt_dataset = VQADataset.load_dataset(args.vqa_path)
 
@@ -417,6 +515,7 @@ def main():
             temperature=0.1,  # Lower temperature for more consistent answers
             max_new_tokens=256
         )
+        
         if not save_path.exists():
             pred_dataset = run_on_dataset(
                 gt_dataset, model_args, dataset_path, save_path, args.batch_size, not args.dont_draw_bbox
@@ -424,10 +523,10 @@ def main():
         else:
             pred_dataset = VQADataset.load_dataset(str(save_path))
 
-        # evaluate?
+        # Uncomment for evaluation
         # metric = MultipleChoiceMetric()
-
         # pprint.pprint(metric.evaluate_dataset(pred_dataset, gt_dataset))
+        
     else:
         dataset_path = Path(args.dataset_path) 
         vqa_path = dataset_path / "generated_vqa_samples"
@@ -460,28 +559,22 @@ def main():
 
             if not save_path.exists():
                 pred_dataset = run_on_dataset(
-                    gt_dataset, model_args, dataset_path, save_path, 1
+                    gt_dataset, model_args, dataset_path, save_path, 1, not args.dont_draw_bbox
                 )
             else:
                 pred_dataset = VQADataset.load_dataset(str(save_path))
 
-            # # evaluate?
+            # Uncomment for evaluation
             # metric = MultipleChoiceMetric()
-
             # metric_results = metric.evaluate_dataset(pred_dataset, gt_dataset)
-            
             # summarised_results = metric.summarise(metric_results)
             # summarised_results['model_name'] = model_suffix
-            
-            
+            # 
             # with open(metrics_save_path, 'w') as f:
             #     json.dump(summarised_results, f)
-                
-
+            # 
             # metric.print_latex_tables(metric_results, model_suffix)
-            
             # metric.save_latex_tables(metric_results, model_suffix, metric_latex_save_path)
-                
             # print(f"Inference saved to {save_path}")
             # print(f"Latex tables saved to {metric_latex_save_path}")
         
