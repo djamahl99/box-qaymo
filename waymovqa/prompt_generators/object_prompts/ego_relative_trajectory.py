@@ -1790,7 +1790,7 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
         traj2 = ego_positions
 
         # Get object descriptions for labels
-        obj1_desc = obj.get_object_description()
+        obj1_desc = obj.get_object_description().title()
         obj2_desc = "Ego"
 
         # 1. 3D plot in world coordinates
@@ -2111,196 +2111,349 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
         traj1 = (
             trajectories[object_id]
             if trajectories is not None
-            else np.zeros((0, 3), dtype=float)
+            else np.zeros((len(timestamps), 3), dtype=float)
         )
         traj2 = (
             ego_positions
             if ego_positions is not None
-            else np.zeros((0, 3), dtype=float)
+            else np.zeros((len(timestamps), 3), dtype=float)
         )
 
-        obj1_desc = obj.get_object_description()
+        traj1_avgspeed = np.linalg.norm(traj1[-1] - traj1[0]) / (
+            FRAME_DELTA * len(timestamps)
+        )
+        traj2_avgspeed = np.linalg.norm(traj2[-1] - traj2[0]) / (
+            FRAME_DELTA * len(timestamps)
+        )
+
+        # c = traj1_speeds.mean()
+        # traj2_avgspeed = traj2_speeds.mean()
+
+        print("traj1_avgspeed", traj1_avgspeed)
+        print("traj2_avgspeed", traj2_avgspeed)
+
+        obj1_desc = obj.get_object_description().title()
         obj2_desc = "Ego Vehicle"
 
         # === MAIN 3D TRAJECTORY PLOT ===
-
         fig_3d = go.Figure()
 
-        # Create color scales for time progression
-        n_points = len(traj1)
-        time_colors = np.linspace(0, 1, n_points)
+        # Load LiDAR points
+        dataset_path = Path(camera.image_path).parent.parent
+        pc_folder = dataset_path / "point_clouds"
+        pc_path = pc_folder / f"{frame.scene_id}_{frame.timestamp}_ALL.npy"
+        assert pc_path.exists()
+        lidar_points = np.load(pc_path)
 
-        # Object trajectory
+        # Transform trajectories to ego coordinate system (same as BEV)
+        world_pose = np.array(frame.pose)
+        pose_matrix_inv = np.linalg.inv(world_pose)
+
+        # Transform trajectories to ego frame
+        traj1_ego_3d = traj1.copy().reshape(-1, 3)
+        traj1_ego_3d = np.hstack([traj1_ego_3d, np.ones((traj1_ego_3d.shape[0], 1))])
+        traj1_ego_3d = np.matmul(traj1_ego_3d, pose_matrix_inv.T)
+        traj1_ego_3d = traj1_ego_3d[:, :3]
+
+        traj2_ego_3d = traj2.copy().reshape(-1, 3)
+        traj2_ego_3d = np.hstack([traj2_ego_3d, np.ones((traj2_ego_3d.shape[0], 1))])
+        traj2_ego_3d = np.matmul(traj2_ego_3d, pose_matrix_inv.T)
+        traj2_ego_3d = traj2_ego_3d[:, :3]
+
+        # Calculate dynamic range based on trajectories (same as BEV)
+        bev_centre = (traj1_ego_3d.mean(axis=0) + traj2_ego_3d.mean(axis=0)) / 2.0
+        traj1_mins = traj1_ego_3d.min(axis=0)
+        traj1_maxes = traj1_ego_3d.max(axis=0)
+        traj2_mins = traj2_ego_3d.min(axis=0)
+        traj2_maxes = traj2_ego_3d.max(axis=0)
+        traj_mins = np.minimum(traj1_mins, traj2_mins)
+        traj_maxes = np.maximum(traj1_maxes, traj2_maxes)
+
+        wh = (traj_maxes - traj_mins) * 1.6  # Add margin
+        wh = np.clip(wh, a_min=10.0, a_max=50.0)
+        range_x, range_y, range_z = (
+            wh[0],
+            wh[1],
+            max(wh[2], 8.0),
+        )  # Minimum 8m height range
+
+        # Filter and subsample point cloud for better performance
+        pc_mask = (
+            (lidar_points[:, 0] >= bev_centre[0] - range_x / 2)
+            & (lidar_points[:, 0] <= bev_centre[0] + range_x / 2)
+            & (lidar_points[:, 1] >= bev_centre[1] - range_y / 2)
+            & (lidar_points[:, 1] <= bev_centre[1] + range_y / 2)
+            & (lidar_points[:, 2] >= bev_centre[2] - range_z / 2)
+            & (lidar_points[:, 2] <= bev_centre[2] + range_z / 2)
+        )
+        filtered_pc = lidar_points[pc_mask]
+
+        # Subsample for performance (every 5th point for 3D)
+        subsample_idx = np.arange(0, len(filtered_pc), 5)
+        subsampled_pc = filtered_pc[subsample_idx]
+
+        # Add point cloud as background layer
         fig_3d.add_trace(
             go.Scatter3d(
-                x=traj1[:, 0],
-                y=traj1[:, 1],
-                z=traj1[:, 2] if traj1.shape[1] > 2 else np.zeros(len(traj1)),
-                mode="lines+markers",
-                line=dict(
-                    color=time_colors,
-                    colorscale="Viridis",
-                    width=6,
-                    # colorbar=dict(title="Time Progress"),
+                x=subsampled_pc[:, 0],
+                y=subsampled_pc[:, 1],
+                z=subsampled_pc[:, 2],
+                mode="markers",
+                marker=dict(
+                    size=1.5,
+                    color="lightgray",
+                    opacity=0.2,
+                    symbol="circle",
                 ),
-                marker=dict(size=4, opacity=0.8),
-                name=obj1_desc,
-                hovertemplate=(
-                    f"<b>{obj1_desc}</b><br>"
-                    "Position: (%{x:.2f}, %{y:.2f}, %{z:.2f})<br>"
-                    "Time: %{text}<br>"
-                    "<extra></extra>"
-                ),
-                text=[f"t={t:.2f}s" for t in timestamps],
+                name="LiDAR Points",
+                showlegend=False,
+                hoverinfo="skip",
             )
         )
 
-        # Ego trajectory
-        fig_3d.add_trace(
-            go.Scatter3d(
-                x=traj2[:, 0],
-                y=traj2[:, 1],
-                z=traj2[:, 2] if traj2.shape[1] > 2 else np.zeros(len(traj2)),
-                mode="lines+markers",
-                line=dict(color=time_colors, colorscale="Plasma", width=6),
-                marker=dict(size=4, opacity=0.8),
-                name=obj2_desc,
-                hovertemplate=(
-                    f"<b>{obj2_desc}</b><br>"
-                    "Position: (%{x:.2f}, %{y:.2f}, %{z:.2f})<br>"
-                    "Time: %{text}<br>"
-                    "<extra></extra>"
-                ),
-                text=[f"t={t:.2f}s" for t in timestamps],
+        # Object trajectory - only show if moving
+        if traj1_avgspeed > 0.1:
+            fig_3d.add_trace(
+                go.Scatter3d(
+                    x=traj1_ego_3d[:, 0],
+                    y=traj1_ego_3d[:, 1],
+                    z=traj1_ego_3d[:, 2],
+                    mode="lines",
+                    line=dict(
+                        color="#2E8B57",  # Sea green to match BEV
+                        width=6,
+                    ),
+                    name=obj1_desc,
+                    hovertemplate=(
+                        f"<b>{obj1_desc}</b><br>"
+                        "Position: (%{x:.2f}, %{y:.2f}, %{z:.2f})<br>"
+                        "Time: %{text}<br>"
+                        "<extra></extra>"
+                    ),
+                    text=[f"t={t:.2f}s" for t in timestamps],
+                )
             )
-        )
 
-        # Add waypoints
+        # Ego trajectory - only show if moving
+        if traj2_avgspeed > 0.1:
+            fig_3d.add_trace(
+                go.Scatter3d(
+                    x=traj2_ego_3d[:, 0],
+                    y=traj2_ego_3d[:, 1],
+                    z=traj2_ego_3d[:, 2],
+                    mode="lines",
+                    line=dict(color="#DC143C", width=6),  # Crimson to match BEV
+                    name=obj2_desc,
+                    hovertemplate=(
+                        f"<b>{obj2_desc}</b><br>"
+                        "Position: (%{x:.2f}, %{y:.2f}, %{z:.2f})<br>"
+                        "Time: %{text}<br>"
+                        "<extra></extra>"
+                    ),
+                    text=[f"t={t:.2f}s" for t in timestamps],
+                )
+            )
+
+        # Add waypoints with same logic as BEV
         waypoints = [
-            (0, "start", "circle", ["green", "red"]),
-            (timestamp_idx, "current", "diamond", ["blue", "orange"]),
-            (-1, "end", "square", ["darkgreen", "darkred"]),
+            (0, "Start", "circle", ["#228B22", "#B22222"]),
+            (timestamp_idx, "Current", "diamond", ["#4169E1", "#FF8C00"]),
+            (-1, "End", "square", ["#006400", "#8B0000"]),
         ]
 
         for idx, label, symbol, colors in waypoints:
-            # Object waypoint
-            fig_3d.add_trace(
-                go.Scatter3d(
-                    x=[traj1[idx, 0]],
-                    y=[traj1[idx, 1]],
-                    z=[traj1[idx, 2] if traj1.shape[1] > 2 else 0],
-                    mode="markers",
-                    marker=dict(
-                        size=12,
-                        color=colors[0],
-                        symbol=symbol,
-                        line=dict(width=2, color="white"),
-                    ),
-                    name=f"{obj1_desc} ({label})",
-                    showlegend=True,
-                    hovertemplate=f"<b>{obj1_desc} ({label})</b><br>Time: {timestamps[idx]:.2f}s<extra></extra>",
+            # Object waypoint - only if moving or current
+            if (traj1_avgspeed > 0.1) or (idx == timestamp_idx):
+                fig_3d.add_trace(
+                    go.Scatter3d(
+                        x=[traj1_ego_3d[idx, 0]],
+                        y=[traj1_ego_3d[idx, 1]],
+                        z=[traj1_ego_3d[idx, 2]],
+                        mode="markers",
+                        marker=dict(
+                            size=12,
+                            color=colors[0],
+                            symbol=symbol,
+                            line=dict(width=2, color="white"),
+                        ),
+                        name=f"{obj1_desc} ({label})",
+                        showlegend=True,
+                        hovertemplate=f"<b>{obj1_desc} ({label})</b><br>Time: {timestamps[idx]:.2f}s<extra></extra>",
+                    )
                 )
-            )
 
-            # Ego waypoint
-            fig_3d.add_trace(
-                go.Scatter3d(
-                    x=[traj2[idx, 0]],
-                    y=[traj2[idx, 1]],
-                    z=[traj2[idx, 2] if traj2.shape[1] > 2 else 0],
-                    mode="markers",
-                    marker=dict(
-                        size=12,
-                        color=colors[1],
-                        symbol=symbol,
-                        line=dict(width=2, color="white"),
-                    ),
-                    name=f"{obj2_desc} ({label})",
-                    showlegend=True,
-                    hovertemplate=f"<b>{obj2_desc} ({label})</b><br>Time: {timestamps[idx]:.2f}s<extra></extra>",
+            # Ego waypoint - only if moving or current
+            if (traj2_avgspeed > 0.1) or (idx == timestamp_idx):
+                fig_3d.add_trace(
+                    go.Scatter3d(
+                        x=[traj2_ego_3d[idx, 0]],
+                        y=[traj2_ego_3d[idx, 1]],
+                        z=[traj2_ego_3d[idx, 2]],
+                        mode="markers",
+                        marker=dict(
+                            size=12,
+                            color=colors[1],
+                            symbol=symbol,
+                            line=dict(width=2, color="white"),
+                        ),
+                        name=f"{obj2_desc} ({label})",
+                        showlegend=True,
+                        hovertemplate=f"<b>{obj2_desc} ({label})</b><br>Time: {timestamps[idx]:.2f}s<extra></extra>",
+                    )
                 )
-            )
 
+        # Calculate camera position - ego position + 10m above
+        ego_current_pos = (
+            traj2_ego_3d[timestamp_idx] if traj2_avgspeed > 0.1 else bev_centre
+        )
+        camera_x = ego_current_pos[0]
+        camera_y = ego_current_pos[1] - 15  # 15m behind ego
+        camera_z = ego_current_pos[2] + 10  # 10m above ego
 
-        # Get the current position of traj1 at the specified timestamp
-        current_pos = traj1[timestamp_idx]
-        center_x = current_pos[0]
-        center_y = current_pos[1]
-        center_z = current_pos[2] if traj1.shape[1] > 2 else 0
-        
-        traj1_mins = traj1.min(axis=0)
-        traj1_maxes = traj1.max(axis=0)
-        traj2_mins = traj2.min(axis=0)
-        traj2_maxes = traj2.max(axis=0)
-        print('traj1_mins', traj1_mins, traj2_mins)
-
-        # Update 3D layout with centered view
+        # Professional 3D layout
         fig_3d.update_layout(
             scene=dict(
                 xaxis=dict(
-                    title="X (m)",
-                    range=[center_x - 5, center_x + 5]
+                    title=dict(text="X (m)", font=dict(size=24, family="Arial Black")),
+                    range=[bev_centre[0] - range_x / 2, bev_centre[0] + range_x / 2],
+                    tickfont=dict(size=18, family="Arial"),
+                    showgrid=True,
+                    gridcolor="rgba(128,128,128,0.3)",
+                    gridwidth=1,
                 ),
                 yaxis=dict(
-                    title="Y (m)", 
-                    range=[center_y - 5, center_y + 5]
+                    title=dict(text="Y (m)", font=dict(size=24, family="Arial Black")),
+                    range=[bev_centre[1] - range_y / 2, bev_centre[1] + range_y / 2],
+                    tickfont=dict(size=18, family="Arial"),
+                    showgrid=True,
+                    gridcolor="rgba(128,128,128,0.3)",
+                    gridwidth=1,
                 ),
                 zaxis=dict(
-                    title="Z (m)",
-                    range=[center_z - 5, center_z + 5]
+                    title=dict(text="Z (m)", font=dict(size=24, family="Arial Black")),
+                    range=[bev_centre[2] - range_z / 2, bev_centre[2] + range_z / 2],
+                    tickfont=dict(size=18, family="Arial"),
+                    showgrid=True,
+                    gridcolor="rgba(128,128,128,0.3)",
+                    gridwidth=1,
                 ),
-                camera=dict(eye=dict(x=1.5, y=1.5, z=1.5)),
+                camera=dict(
+                    eye=dict(
+                        x=(camera_x - bev_centre[0])
+                        / range_x
+                        * 2,  # Normalized camera position
+                        y=(camera_y - bev_centre[1]) / range_y * 2,
+                        z=(camera_z - bev_centre[2]) / range_z * 2,
+                    ),
+                    center=dict(x=0, y=0, z=0),  # Look at scene center
+                    up=dict(x=0, y=0, z=1),  # Z-up orientation
+                ),
                 aspectmode="manual",
-                aspectratio=dict(x=1, y=1, z=0.2)  # This maintains the 50:50:10 ratio visually
-            ),
-            title=dict(
-                text=f"3D Trajectory Analysis - {obj1_desc}", x=0.5, font=dict(size=20)
+                aspectratio=dict(x=1, y=1, z=0.4),  # Reasonable 3D proportions
+                bgcolor="white",
             ),
             height=600,
+            width=600,
             showlegend=True,
-            annotations=[
-                dict(
-                    text=(
-                        f"<b>Scene Metadata</b><br>"
-                        f"Scene ID: {obj.scene_id}<br>"
-                        f"Timestamp: {frame.timestamp:.2f}s<br>"
-                        f"Camera: {camera.name}<br>"
-                        f"Question: {question_txt}<br>"
-                        f"Answer: {answer_txt}"
-                    ),
-                    showarrow=False,
-                    xref="paper",
-                    yref="paper",
-                    x=0.02,
-                    y=0.98,
-                    bgcolor="rgba(255,255,255,0.9)",
-                    bordercolor="gray",
-                    borderwidth=1,
-                    font=dict(size=10),
-                )
-            ],
+            legend=dict(
+                x=0.02,
+                y=0.02,
+                bgcolor="rgba(255,255,255,0.95)",
+                bordercolor="black",
+                borderwidth=1,
+                font=dict(size=16, family="Arial"),
+                itemsizing="trace",
+                itemwidth=50,
+            ),
+            plot_bgcolor="white",
+            paper_bgcolor="white",
+            margin=dict(l=80, r=80, t=80, b=80),
+            font=dict(family="Arial", size=12, color="black"),
         )
 
         fig_bev = go.Figure()
 
-        # Create color scales for time progression
-        n_points = len(traj1)
-        time_colors = np.linspace(0, 1, n_points)
+        # transform lidar to world
+        world_pose = np.array(frame.pose)
+        pose_matrix_inv = np.linalg.inv(world_pose)
+
+        # Get the current position for centering
+        # current_pos = traj1[timestamp_idx]
+        traj1_ego = traj1.copy().reshape(-1, 3)
+        traj1_ego = np.hstack([traj1_ego, np.ones((traj1_ego.shape[0], 1))])
+        traj1_ego = np.matmul(traj1_ego, pose_matrix_inv.T)
+        traj1_ego = traj1_ego[:, :3]
+
+        traj2_ego = traj2.copy().reshape(-1, 3)
+        traj2_ego = np.hstack([traj2_ego, np.ones((traj2_ego.shape[0], 1))])
+        traj2_ego = np.matmul(traj2_ego, pose_matrix_inv.T)
+        traj2_ego = traj2_ego[:, :3]
+        bev_centre = (traj1_ego.mean(axis=0) + traj2_ego.mean(axis=0)) / 2.0
+        bev_center_x = bev_centre[0]
+        bev_center_y = bev_centre[1]
+
+        traj1_mins = traj1_ego.min(axis=0)
+        traj1_maxes = traj1_ego.max(axis=0)
+        traj2_mins = traj2_ego.min(axis=0)
+        traj2_maxes = traj2_ego.max(axis=0)
+        traj_mins = np.minimum(traj1_mins, traj2_mins)
+        traj_maxes = np.maximum(traj1_maxes, traj2_maxes)
+
+        wh = (traj_maxes - traj_mins)[:2] * 1.6  # add some margin
+        wh = np.clip(wh, a_min=10.0, a_max=50.0)
+        # range_x, range_y = wh[0], wh[1]
+        # bev_range = wh.max()
+        range_x, range_y = wh.max(), wh.max()
+
+        # Filter point cloud to reasonable range for visualization (±30m from center)
+        # pc_mask = (
+        #     (world_lidar[:, 0] >= center_x - 30) &
+        #     (world_lidar[:, 0] <= center_x + 30) &
+        #     (world_lidar[:, 1] >= center_y - 30) &
+        #     (world_lidar[:, 1] <= center_y + 30)
+        # )
+        # filtered_pc = world_lidar[pc_mask]
+        filtered_pc = lidar_points
+
+        # Subsample point cloud for performance (every 3rd point)
+        # subsample_idx = np.arange(0, len(filtered_pc), 3)
+        # subsampled_pc = filtered_pc[subsample_idx]
+        subsampled_pc = filtered_pc
+
+        # Add point cloud as background layer
+        fig_bev.add_trace(
+            go.Scatter(
+                x=subsampled_pc[:, 0],
+                y=subsampled_pc[:, 1],
+                mode="markers",
+                marker=dict(
+                    size=3,
+                    color="lightgray",
+                    opacity=0.5,
+                    symbol="circle",
+                ),
+                name="LiDAR Points",
+                showlegend=False,
+                hoverinfo="skip",  # Disable hover for point cloud
+            )
+        )
 
         # Object trajectory - using 2D Scatter for BEV
         fig_bev.add_trace(
             go.Scatter(
-                x=traj1[:, 0],
-                y=traj1[:, 1],
-                mode="lines+markers",
+                x=traj1_ego[:, 0],
+                y=traj1_ego[:, 1],
+                mode="lines",
+                # mode="lines+markers",
                 line=dict(
-                    color='green',
-                    width=6,
+                    color="#2E8B57",  # Sea green - better for print
+                    width=4,
                 ),
                 marker=dict(
-                    size=4, 
-                    opacity=0.8,
-                    color='green',
+                    size=6,
+                    opacity=0.9,
+                    color="#2E8B57",
+                    line=dict(width=1, color="white"),
                 ),
                 name=obj1_desc,
                 hovertemplate=(
@@ -2316,17 +2469,15 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
         # Ego trajectory - using 2D Scatter for BEV
         fig_bev.add_trace(
             go.Scatter(
-                x=traj2[:, 0],
-                y=traj2[:, 1],
-                mode="lines+markers",
-                line=dict(
-                    color='red', 
-                    width=6
-                ),
+                x=traj2_ego[:, 0],
+                y=traj2_ego[:, 1],
+                mode="lines",
+                line=dict(color="#DC143C", width=4),  # Crimson - better for print
                 marker=dict(
-                    size=4, 
-                    opacity=0.8,
-                    color='red',
+                    size=6,
+                    opacity=0.9,
+                    color="#DC143C",
+                    line=dict(width=1, color="white"),
                 ),
                 name=obj2_desc,
                 hovertemplate=(
@@ -2339,101 +2490,135 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
             )
         )
 
-        # Add waypoints
+        # Add waypoints with professional styling
         waypoints = [
-            (0, "start", "circle", ["green", "red"]),
-            (timestamp_idx, "current", "diamond", ["blue", "orange"]),
-            (-1, "end", "square", ["darkgreen", "darkred"]),
+            (0, "Start", "circle", ["#228B22", "#B22222"]),  # Forest green, Fire brick
+            (
+                timestamp_idx,
+                "Current",
+                "diamond",
+                ["#4169E1", "#FF8C00"],
+            ),  # Royal blue, Dark orange
+            (-1, "End", "square", ["#006400", "#8B0000"]),  # Dark green, Dark red
         ]
 
         for idx, label, symbol, colors in waypoints:
-            # Object waypoint
-            fig_bev.add_trace(
-                go.Scatter(
-                    x=[traj1[idx, 0]],
-                    y=[traj1[idx, 1]],
-                    mode="markers",
-                    marker=dict(
-                        size=12,
-                        color=colors[0],
-                        symbol=symbol,
-                        line=dict(width=2, color="white"),
-                    ),
-                    name=f"{obj1_desc} ({label})",
-                    showlegend=True,
-                    hovertemplate=f"<b>{obj1_desc} ({label})</b><br>Time: {timestamps[idx]:.2f}s<extra></extra>",
+            if (traj1_avgspeed > 0.1) or (idx == timestamp_idx):
+                # Object waypoint
+                fig_bev.add_trace(
+                    go.Scatter(
+                        x=[traj1_ego[idx, 0]],
+                        y=[traj1_ego[idx, 1]],
+                        mode="markers",
+                        marker=dict(
+                            size=18,
+                            color=colors[0],
+                            symbol=symbol,
+                            line=dict(width=2, color="white"),
+                        ),
+                        name=f"{obj1_desc} ({label})",
+                        showlegend=True,
+                        hovertemplate=f"<b>{obj1_desc} ({label})</b><br>Time: {timestamps[idx]:.2f}s<extra></extra>",
+                    )
                 )
-            )
 
             # Ego waypoint
-            fig_bev.add_trace(
-                go.Scatter(
-                    x=[traj2[idx, 0]],
-                    y=[traj2[idx, 1]],
-                    mode="markers",
-                    marker=dict(
-                        size=12,
-                        color=colors[1],
-                        symbol=symbol,
-                        line=dict(width=2, color="white"),
-                    ),
-                    name=f"{obj2_desc} ({label})",
-                    showlegend=True,
-                    hovertemplate=f"<b>{obj2_desc} ({label})</b><br>Time: {timestamps[idx]:.2f}s<extra></extra>",
+            if (traj2_avgspeed > 0.1) or (idx == timestamp_idx):
+                fig_bev.add_trace(
+                    go.Scatter(
+                        x=[traj2_ego[idx, 0]],
+                        y=[traj2_ego[idx, 1]],
+                        mode="markers",
+                        marker=dict(
+                            size=18,
+                            color=colors[1],
+                            symbol=symbol,
+                            line=dict(width=2, color="white"),
+                        ),
+                        name=f"{obj2_desc} ({label})",
+                        showlegend=True,
+                        hovertemplate=f"<b>{obj2_desc} ({label})</b><br>Time: {timestamps[idx]:.2f}s<extra></extra>",
+                    )
                 )
-            )
 
-        # Get the current position of traj1 at the specified timestamp
-        current_pos = traj1[timestamp_idx]
-        center_x = current_pos[0]
-        center_y = current_pos[1]
-
-        # Update layout for Bird's Eye View (2D plot)
+        # Professional layout for conference publication
         fig_bev.update_layout(
             xaxis=dict(
-                title="X (m)",
-                range=[center_x - 25, center_x + 25],
-                scaleanchor="y",  # This ensures equal scaling between x and y axes
+                title=dict(text="X (m)", font=dict(size=22, family="Arial Black")),
+                range=[
+                    bev_center_x - range_x / 2,
+                    bev_center_x + range_x / 2,
+                ],  # Tighter range range_x, range_y
+                scaleanchor="y",
                 scaleratio=1,
+                tickfont=dict(size=16, family="Arial"),
+                showgrid=True,
+                gridcolor="rgba(128,128,128,0.3)",
+                gridwidth=1,
+                zeroline=True,
+                zerolinecolor="rgba(128,128,128,0.5)",
+                zerolinewidth=2,
             ),
             yaxis=dict(
-                title="Y (m)", 
-                range=[center_y - 25, center_y + 25],
+                title=dict(text="Y (m)", font=dict(size=22, family="Arial Black")),
+                range=[
+                    bev_center_y - range_y / 2,
+                    bev_center_y + range_y / 2,
+                ],  # Tighter range
+                tickfont=dict(size=16, family="Arial"),
+                showgrid=True,
+                gridcolor="rgba(128,128,128,0.3)",
+                gridwidth=1,
+                zeroline=True,
+                zerolinecolor="rgba(128,128,128,0.5)",
+                zerolinewidth=2,
             ),
-            title=dict(
-                text=f"Bird's Eye View - {obj1_desc}", x=0.5, font=dict(size=20)
-            ),
+            # title=dict(
+            #     text=f"Bird's Eye View - {obj1_desc}",
+            #     x=0.5,
+            #     font=dict(size=20, family="Arial Black", color="black")
+            # ),
             height=600,
-            width=600,  # Square aspect ratio for BEV
+            width=600,
             showlegend=True,
-            annotations=[
-                dict(
-                    text=(
-                        f"<b>Scene Metadata</b><br>"
-                        f"Scene ID: {obj.scene_id}<br>"
-                        f"Timestamp: {frame.timestamp:.2f}s<br>"
-                        f"Camera: {camera.name}<br>"
-                        f"Question: {question_txt}<br>"
-                        f"Answer: {answer_txt}"
-                    ),
-                    showarrow=False,
-                    xref="paper",
-                    yref="paper",
-                    x=0.02,
-                    y=0.98,
-                    bgcolor="rgba(255,255,255,0.9)",
-                    bordercolor="gray",
-                    borderwidth=1,
-                    font=dict(size=10),
-                )
-            ],
-            # Add grid for better spatial reference
+            legend=dict(
+                x=0.02,
+                y=0.02,
+                bgcolor="rgba(255,255,255,0.95)",
+                bordercolor="black",
+                borderwidth=1,
+                font=dict(size=26, family="Arial"),
+                itemsizing="trace",
+                itemwidth=50,
+            ),
             plot_bgcolor="white",
-            xaxis_showgrid=True,
-            yaxis_showgrid=True,
-            xaxis_gridcolor="lightgray",
-            yaxis_gridcolor="lightgray",
+            paper_bgcolor="white",
+            margin=dict(l=40, r=40, t=40, b=40),
+            font=dict(family="Arial", size=12, color="black"),
         )
+
+        # Add professional annotation box
+        # fig_bev.add_annotation(
+        #     text=(
+        #         f"<b>Scene Metadata</b><br>"
+        #         # f"Scene: {obj.scene_id}<br>"
+        #         # f"Time: {frame.timestamp:.2f}s<br>"
+        #         # f"Camera: {camera.name}"
+        #     ),
+        #     showarrow=False,
+        #     xref="paper",
+        #     yref="paper",
+        #     x=0.98,
+        #     y=0.98,
+        #     xanchor="right",
+        #     yanchor="top",
+        #     bgcolor="rgba(255,255,255,0.95)",
+        #     bordercolor="black",
+        #     borderwidth=1,
+        #     font=dict(size=21, family="Arial", color="black"),
+        #     align="left",
+        # )
+
         # === TIMELINE PLOT ===
 
         fig_timeline = go.Figure()
@@ -2484,178 +2669,153 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
         )
 
         # === CAMERA VIEW PLOT ===
-
         fig_camera = go.Figure()
 
-        try:
-            # Load and process camera image
-            if hasattr(camera, "image_path") and camera.image_path:
-                img = Image.open(camera.image_path)
+        # Load and process camera image
+        if hasattr(camera, "image_path") and camera.image_path:
+            img = Image.open(camera.image_path)
 
-                # Project trajectories to image coordinates
-                pose_matrix_inv = np.linalg.inv(np.array(frame.pose))
+            # Project trajectories to image coordinates
+            pose_matrix_inv = np.linalg.inv(np.array(frame.pose))
 
-                # Transform trajectories to ego coordinates
-                traj1_ego = np.hstack([traj1.reshape(-1, 3), np.ones((len(traj1), 1))])
-                traj1_ego = np.matmul(traj1_ego, pose_matrix_inv.T)[:, :3]
+            # Project to image coordinates
+            proj_points1 = camera.project_to_image(traj1_ego, frame)
+            proj_points1_ok = proj_points1[:, -1].astype(bool) & (
+                proj_points1[:, 2] > 0
+            )
+            proj_points1 = proj_points1[proj_points1_ok]
 
-                traj2_ego = np.hstack([traj2.reshape(-1, 3), np.ones((len(traj2), 1))])
-                traj2_ego = np.matmul(traj2_ego, pose_matrix_inv.T)[:, :3]
+            proj_points2 = camera.project_to_image(traj2_ego, frame)
+            proj_points2_ok = proj_points2[:, -1].astype(bool) & (
+                proj_points2[:, 2] > 0
+            )
+            proj_points2 = proj_points2[proj_points2_ok]
 
-                # Project to image coordinates
-                proj_points1 = camera.project_to_image(traj1_ego, frame)
-                proj_points1_ok = proj_points1[:, -1].astype(bool) & (
-                    proj_points1[:, 2] > 0
+            # Add background image
+            buffered = BytesIO()
+            img.save(buffered, format="PNG")
+            img_str = base64.b64encode(buffered.getvalue()).decode()
+
+            fig_camera.add_layout_image(
+                dict(
+                    source=f"data:image/png;base64,{img_str}",
+                    xref="x",
+                    yref="y",
+                    x=0,
+                    y=0,
+                    sizex=img.width,
+                    sizey=img.height,
+                    sizing="stretch",
+                    opacity=1.0,
+                    layer="below",
                 )
-                proj_points1 = proj_points1[proj_points1_ok]
+            )
 
-                proj_points2 = camera.project_to_image(traj2_ego, frame)
-                proj_points2_ok = proj_points2[:, -1].astype(bool) & (
-                    proj_points2[:, 2] > 0
-                )
-                proj_points2 = proj_points2[proj_points1_ok]
-
-                # Add background image
-                buffered = BytesIO()
-                img.save(buffered, format="PNG")
-                img_str = base64.b64encode(buffered.getvalue()).decode()
-
-                fig_camera.add_layout_image(
-                    dict(
-                        source=f"data:image/png;base64,{img_str}",
-                        xref="x",
-                        yref="y",
-                        x=0,
-                        y=0,
-                        sizex=img.width,
-                        sizey=img.height,
-                        sizing="stretch",
-                        opacity=1.0,
-                        layer="below",
-                    )
-                )
-
-                # Add projected trajectories
+            # Add projected trajectories - only show lines for moving objects
+            if traj1_avgspeed > 0.1 and len(proj_points1) > 1:
                 fig_camera.add_trace(
                     go.Scatter(
                         x=proj_points1[:, 0],
                         y=proj_points1[:, 1],
-                        mode="lines+markers",
-                        line=dict(color="cyan", width=4),
-                        marker=dict(size=6, color="cyan"),
-                        name=f"{obj1_desc} (projected)",
+                        mode="lines",
+                        line=dict(color="#2E8B57", width=4),  # Sea green to match BEV
+                        name=f"{obj1_desc}",
                         hovertemplate="<b>Image Coordinates</b><br>x: %{x}<br>y: %{y}<extra></extra>",
                     )
                 )
 
+            if traj2_avgspeed > 0.1 and len(proj_points2) > 1:
                 fig_camera.add_trace(
                     go.Scatter(
                         x=proj_points2[:, 0],
                         y=proj_points2[:, 1],
-                        mode="lines+markers",
-                        line=dict(color="magenta", width=4),
-                        marker=dict(size=6, color="magenta"),
-                        name=f"{obj2_desc} (projected)",
+                        mode="lines",
+                        line=dict(color="#DC143C", width=4),  # Crimson to match BEV
+                        name=f"{obj2_desc}",
                         hovertemplate="<b>Image Coordinates</b><br>x: %{x}<br>y: %{y}<extra></extra>",
                     )
                 )
 
-                # Add waypoint markers
-                waypoint_indices = [0, timestamp_idx, -1]
-                waypoint_colors = ["green", "blue", "darkgreen"]
-                waypoint_symbols = ["circle", "diamond", "square"]
+            # Add waypoint markers - same logic as BEV
+            waypoints = [
+                (0, "Start", "circle", ["#228B22", "#B22222"]),
+                (timestamp_idx, "Current", "diamond", ["#4169E1", "#FF8C00"]),
+                (-1, "End", "square", ["#006400", "#8B0000"]),
+            ]
 
-                for i, (idx, color, symbol) in enumerate(
-                    zip(waypoint_indices, waypoint_colors, waypoint_symbols)
-                ):
-                    if len(proj_points1) > abs(idx):
+            for i, (idx, label, symbol, colors) in enumerate(waypoints):
+                # Only add start/end markers if object is moving, always add current
+                if len(proj_points1) > abs(idx):
+                    if (traj1_avgspeed > 0.1) or (idx == timestamp_idx):
                         fig_camera.add_trace(
                             go.Scatter(
                                 x=[proj_points1[idx, 0]],
                                 y=[proj_points1[idx, 1]],
                                 mode="markers",
                                 marker=dict(
-                                    size=15,
-                                    color=color,
+                                    size=30,
+                                    color=colors[0],
                                     symbol=symbol,
                                     line=dict(width=2, color="white"),
                                 ),
-                                name=f"{obj1_desc} ({'start' if i==0 else 'current' if i==1 else 'end'})",
+                                name=f"{obj1_desc} ({label})",
                                 showlegend=True,
-                                hovertemplate=f"<b>{obj1_desc}</b><br>x: %{{x}}<br>y: %{{y}}<extra></extra>",
+                                hovertemplate=f"<b>{obj1_desc} ({label})</b><br>x: %{{x}}<br>y: %{{y}}<extra></extra>",
                             )
                         )
 
-                    if len(proj_points2) > abs(idx):
-                        ego_color = (
-                            "red"
-                            if color == "green"
-                            else "orange" if color == "blue" else "darkred"
-                        )
+                if len(proj_points2) > abs(idx):
+                    if (traj2_avgspeed > 0.1) or (idx == timestamp_idx):
                         fig_camera.add_trace(
                             go.Scatter(
                                 x=[proj_points2[idx, 0]],
                                 y=[proj_points2[idx, 1]],
                                 mode="markers",
                                 marker=dict(
-                                    size=15,
-                                    color=ego_color,
+                                    size=30,
+                                    color=colors[1],
                                     symbol=symbol,
                                     line=dict(width=2, color="white"),
                                 ),
-                                name=f"{obj2_desc} ({'start' if i==0 else 'current' if i==1 else 'end'})",
+                                name=f"{obj2_desc} ({label})",
                                 showlegend=True,
-                                hovertemplate=f"<b>{obj2_desc}</b><br>x: %{{x}}<br>y: %{{y}}<extra></extra>",
+                                hovertemplate=f"<b>{obj2_desc} ({label})</b><br>x: %{{x}}<br>y: %{{y}}<extra></extra>",
                             )
                         )
 
-                # Update camera view layout
-                fig_camera.update_layout(
-                    title=f"Camera View - {camera.name}",
-                    xaxis=dict(
-                        range=[0, img.width], title="X (pixels)", showgrid=False
-                    ),
-                    yaxis=dict(
-                        range=[img.height, 0], title="Y (pixels)", showgrid=False
-                    ),  # Flip Y axis
-                    height=600,
-                    showlegend=True,
-                    plot_bgcolor="rgba(0,0,0,0)",  # Transparent background
-                    annotations=[
-                        dict(
-                            text=(
-                                f"<b>Scene Metadata</b><br>"
-                                f"Scene ID: {obj.scene_id}<br>"
-                                f"Timestamp: {frame.timestamp:.2f}s<br>"
-                                f"Camera: {camera.name}<br>"
-                                f"Question: {question_txt}<br>"
-                                f"Answer: {answer_txt}"
-                            ),
-                            showarrow=False,
-                            xref="paper",
-                            yref="paper",
-                            x=0.02,
-                            y=0.98,
-                            bgcolor="rgba(255,255,255,0.9)",
-                            bordercolor="gray",
-                            borderwidth=1,
-                            font=dict(size=10),
-                        )
-                    ],
-                )
-        except Exception as e:
-            print(f"Error loading camera image: {e}")
-            fig_camera.add_annotation(
-                text="Camera image unavailable",
-                xref="paper",
-                yref="paper",
-                x=0.5,
-                y=0.5,
-                showarrow=False,
-                font=dict(size=16, color="red"),
-            )
+            # Clean layout - just the raw image with overlays
             fig_camera.update_layout(
-                title="Camera View (Image Unavailable)", height=400
+                xaxis=dict(
+                    range=[0, img.width],
+                    showgrid=False,
+                    showticklabels=False,
+                    zeroline=False,
+                    visible=False,
+                ),
+                yaxis=dict(
+                    range=[img.height, 0],  # Flip Y axis for image coordinates
+                    showgrid=False,
+                    showticklabels=False,
+                    zeroline=False,
+                    visible=False,
+                ),
+                height=600,
+                width=int(600 * img.width / img.height),  # Maintain aspect ratio
+                showlegend=True,
+                legend=dict(
+                    x=0.02,
+                    y=0.02,
+                    bgcolor="rgba(255,255,255,0.95)",
+                    bordercolor="black",
+                    borderwidth=1,
+                    font=dict(size=30, family="Arial"),
+                    itemsizing="trace",
+                    itemwidth=50,
+                ),
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+                margin=dict(l=0, r=0, t=0, b=0),  # No margins for clean image
+                font=dict(family="Arial", size=12, color="black"),
             )
 
         # === SAVE OR DISPLAY ===
@@ -2716,13 +2876,17 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
                     f"{base_path}_3d.png", width=1200, height=800, scale=2
                 )
                 fig_bev.write_image(
-                    f"{base_path}_bev.png", width=1200, height=1200, scale=2
+                    f"{base_path}_bev.png",
+                    width=1200,  # Higher resolution
+                    height=1200,  # Higher resolution
+                    scale=2,  # Your existing scale
+                    engine="kaleido",  # Ensures consistent rendering
                 )
                 fig_timeline.write_image(
                     f"{base_path}_timeline.png", width=1200, height=600, scale=2
                 )
                 fig_camera.write_image(
-                    f"{base_path}_camera.png", width=1200, height=800, scale=2
+                    f"{base_path}_camera.png", width=1920, height=1080, scale=2
                 )
 
             print(f"Plots saved with base path: {base_path}")
@@ -2930,9 +3094,7 @@ class EgoRelativeObjectTrajectoryMultiFramePromptGenerator(
                     continue
 
                 if frame_idx == 0:
-                    frame_idx = (
-                        10  # make it the second frame if its currently the first
-                    )
+                    frame_idx = 1  # make it the second frame if its currently the first
 
                 previous_frame = frames[frame_idx - 1]
                 current_frame = frames[frame_idx]
@@ -3038,3 +3200,139 @@ class EgoRelativeObjectTrajectoryMultiFramePromptGenerator(
 
     def get_question_type(self):
         return MultipleFrameMultipleChoiceQuestion
+
+    def visualise_sample(
+        self,
+        question_obj: MultipleFrameMultipleChoiceQuestion,
+        answer_obj: MultipleChoiceAnswer,
+        save_path,
+        frames,
+        pred_answer_obj: Optional[MultipleChoiceAnswer] = None,
+        extra_text="",
+        figsize=(12, 8),
+        box_color="green",
+        text_fontsize=12,
+        title_fontsize=14,
+        dpi=150,
+    ):
+        """
+        Visualises trajectories etc.
+
+        Args:
+            question_obj: Question object with image_path and question text
+            answer_obj: MultipleChoiceAnswer
+            save_path: Path to save the visualization
+            frames:
+            figsize: Figure size (width, height)
+            box_color: Color for bounding boxes
+            text_fontsize: Font size for question/answer text
+            title_fontsize: Font size for the title
+            dpi: DPI for saved image
+        """
+        if question_obj.data is None:
+            raise ValueError("question_obj.data should not be none")
+
+        object_id = question_obj.data["object_id"]
+        best_camera_name = question_obj.data["best_camera_name"]
+        answer_description = question_obj.data["question_dict"]["answer_description"]
+
+        if len(frames) > 0:
+            timestamps = np.array([frame.timestamp for frame in frames], dtype=int)
+
+            (trajectories, speeds, accels, ego_positions, ego_speeds, ego_vectors) = (
+                self._calculate_trajectories(frames, timestamps)
+            )
+
+            question_txt = question_obj.question
+            answer_txt = answer_obj.answer
+
+            if pred_answer_obj is not None:
+                extra_text = (
+                    f"<br>Prediction: {pred_answer_obj.answer}"
+                    if isinstance(pred_answer_obj, MultipleChoiceAnswer)
+                    else f"<br>Raw Prediction: {pred_answer_obj.get_answer_text()}"
+                )
+
+            current_frame = next(
+                frame
+                for frame in frames
+                if frame.timestamp == question_obj.current_timestamp
+            )
+
+            best_camera_current_frame = next(
+                camera
+                for camera in current_frame.cameras
+                if camera.name == best_camera_name
+            )
+
+            previous_frame = next(
+                frame
+                for frame in frames
+                if frame.timestamp == question_obj.previous_timestamp
+            )
+
+            best_camera_previous_frame = next(
+                camera
+                for camera in previous_frame.cameras
+                if camera.name == best_camera_name
+            )
+
+            self.visualize_trajectories_plotly(
+                object_id,
+                trajectories,
+                ego_positions,
+                previous_frame,
+                best_camera_previous_frame,
+                timestamps,
+                save_path=str(save_path.with_name(f"{save_path.name}_previous")),
+                question_txt=question_txt,
+                answer_txt=answer_txt + extra_text,
+                answer_description=answer_description,
+            )
+            self.visualize_trajectories_plotly(
+                object_id,
+                trajectories,
+                ego_positions,
+                current_frame,
+                best_camera_current_frame,
+                timestamps,
+                save_path=str(save_path.with_name(f"{save_path.name}_current")),
+                question_txt=question_txt,
+                answer_txt=answer_txt + extra_text,
+                answer_description=answer_description,
+            )
+        else:
+            from waymovqa.prompt_generators.object_prompts.object_drawn_box_prompt import (
+                ObjectDrawnBoxPromptGenerator,
+            )
+
+            single_image_question = SingleImageMultipleChoiceQuestion(
+                generator_name=question_obj.generator_name,
+                data=question_obj.data,
+                question_id=question_obj.question_id,
+                image_path=question_obj.image_paths[
+                    question_obj.camera_names.index(
+                        question_obj.data["best_camera_name"]
+                    )
+                ],
+                question=question_obj.question,
+                choices=question_obj.choices,
+                scene_id=question_obj.scene_id,
+                timestamp=question_obj.timestamp,
+                camera_name=question_obj.data["best_camera_name"],
+            )
+
+            box_prompt_generator = ObjectDrawnBoxPromptGenerator()
+            box_prompt_generator.visualise_sample(
+                single_image_question,
+                answer_obj,
+                save_path,
+                frames,
+                pred_answer_obj,
+                extra_text,
+                figsize,
+                box_color,
+                text_fontsize,
+                title_fontsize,
+                dpi,
+            )
