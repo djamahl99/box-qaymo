@@ -243,7 +243,7 @@ def run_on_dataset(
 
             image_path = question.image_paths[cam_idx]
 
-            prompt = get_prompt(question, gt_answer) # type: ignore
+            prompt = get_prompt(question, gt_answer)  # type: ignore
 
             batch_text_strs.append(prompt)
             batch_image_paths.append(image_path)
@@ -639,7 +639,7 @@ def main():
     metric = MultipleChoiceMetric()
 
     metric_results = metric.evaluate_dataset(pred_dataset, gt_dataset)
-    model_name = get_model_name_from_path(args.base_path)
+    model_name = get_model_name_from_path(llava_args.base_path)
 
     summarised_results = metric.summarise(metric_results)
     summarised_results["model_name"] = model_name
