@@ -6,4 +6,7 @@ data/meta.json
 *.pyc
 
 figures/
+*.png
+*.json
+*.csv
 wandb/

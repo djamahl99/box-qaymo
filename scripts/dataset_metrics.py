@@ -2,12 +2,14 @@ import sys
 import os
 
 from tqdm import tqdm
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import json
 from pathlib import Path
 
 from waymovqa.data.vqa_dataset import VQADataset
+from waymovqa.metrics.multiple_choice import MultipleChoiceMetric
 import random
 
 from collections import defaultdict
@@ -21,25 +23,27 @@ import numpy as np
 
 
 # Question type mappings based on your templates
+# metric = MultipleChoiceMetric()
+# question_type_mappings = metric.question_type_mappings
+    
 question_type_mappings = {
     # Temporal Trajectory Questions
     "_prompt_faster_than_ego": ("motion", "Ego Relative Speed"),
-    "_prompt_moving_towards_ego": ("motion", "Approach/Divergence"),
-    "_prompt_parallel_motion": ("motion", "Parallel"),
+    "_prompt_moving_towards_ego": ("motion", "Approach.."),
+    "_prompt_parallel_motion": ("motion", "Parallel.."),
     "_prompt_approaching_stop_sign": ("motion", "Approaching Stop Sign"),
-    "_prompt_vehicle_future_path": ("motion", "Ego Collision"),
+    "_prompt_vehicle_future_path": ("motion", "Ego Collision Prediction"),
     "_prompt_ego_following": ("motion", "Following Behavior"),
-    
+    "_movement_direction_prompt": ("motion", "Movement Direction"),
+    "_speed_prompt": ("motion", "Object Speed"),
+
     # Instance-Referenced Questions (with bounding boxes)
     "_color_prompt": ("attribute", "Color"),
     "_label_prompt": ("attribute", "Object Type"),
     "_heading_prompt": ("attribute", "Orientation"),
-    "_speed_prompt": ("attribute", "Speed"),
-    "_movement_direction_prompt": ("attribute", "Movement Direction"),
-    
     # Binary Characteristic Questions
-    "_object_facing_type": ("binary", "Heading"),
-    "_object_movement_direction_type": ("binary", "Movement"),
+    "_object_facing_type": ("binary", "Facing Direction"),
+    "_object_movement_direction_type": ("binary", "Movement Direction"),
     # Speed category questions will be detected by pattern matching
 }
     

@@ -169,8 +169,6 @@ class VQAGenerator:
         generator_name = generator.__class__.__name__
 
         for split_name, split_path in self.split_paths.items():
-            # if split_name == "training":
-            #     continue
             print(f"\nProcessing {split_name} split for {generator_name}")
 
             assert split_path.exists(), f"Split path does not exist: {split_path}"
