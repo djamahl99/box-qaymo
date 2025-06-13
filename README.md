@@ -1,142 +1,187 @@
-# Box-QAymo Code Structure
+# Box-QAymo
 
-## Overview
-Box-QAymo is a comprehensive framework for generating, processing, and evaluating visual question answering (VQA) tasks on the Waymo dataset. The codebase facilitates creating diverse question types about scenes, evaluating model responses using various metrics, and supporting different answer formats.
+**A box-referring VQA dataset and benchmark for evaluating vision-language models on spatial and temporal reasoning in autonomous driving scenarios.**
 
-## Setup
+Box-QAymo addresses a critical gap in autonomous driving AI: the ability to understand and respond to user queries about specific objects in complex driving scenes. Rather than relying on full-scene descriptions, our dataset enables users to express intent by drawing bounding boxes around objects of interest, providing a fast and intuitive interface for focused queries.
 
-### Data
-1. Downlod ```waymo_open_dataset_v_1_4_3``` validation tfrecords
-2. Setup waymo_env following ```requirements_extraction.txt```, this environment will be used for extracting Waymo only.
-3. Extract Waymo tfrecord data using ```waymo_extract.py```
-    - we recommend just having an environment just for this that has an environment with ```waymo-open-dataset-tf-2-12-0==1.6.4``` to handle 
-4. Download ```objectid_to_label.json``` and ```objectid_to_color.json``` and ```meta.json``` from https://drive.google.com/drive/folders/1hgEu0n3TdDilA0nc01DHFo9I1kNfRNf2?usp=sharing and place in ```./data```
+🌐 **[Project Page](https://djamahl99.github.io/qaymo-pages/)**
 
-### Waymo Dataset Preprocessing 
+## Why Box-QAymo?
 
-```waymo_extract.py```
+Current vision-language models (VLMs) struggle with localized, user-driven queries in real-world autonomous driving scenarios. Existing datasets focus on:
+- ❌ Full-scene descriptions without spatial specificity
+- ❌ Waypoint prediction rather than interpretable communication
+- ❌ Idealized assumptions that don't reflect real user needs
 
-Exports Waymo tfrecord files to json, jpg, npy files for metainfo, camera images and LiDAR respectively.
+**Box-QAymo enables:**
+- ✅ **Spatial reasoning** about user-specified objects via bounding boxes
+- ✅ **Temporal understanding** of object motion and inter-object dynamics
+- ✅ **Hierarchical evaluation** from basic perception to complex spatiotemporal reasoning
+- ✅ **Real-world complexity** with crowd-sourced fine-grained annotations
 
-- Need to export object information separately to allow for us to generate prompts etc.
-- Probably necessary to have per frame object information, as the prompt might be possible for one timestamp but not the next.
-- Probably save scene information separately?
+## Dataset Highlights
 
-Structure
+- **202 driving scenes** from Waymo Open Dataset validation split
+- **50% of objects** enhanced with crowd-sourced fine-grained semantic labels
+- **Hierarchical question taxonomy** spanning 3 complexity levels:
+  1. **Binary sanity checks** (movement status, orientation)
+  2. **Instance-grounded questions** (fine-grained classification, color recognition)
+  3. **Motion reasoning** (trajectory analysis, relative motion, path conflicts)
+- **Robust quality control** through negative sampling, temporal consistency, and difficulty stratification
+
+## Question Categories
+
+| Category | Description | Example |
+|----------|-------------|---------|
+| 🔍 **VLM Sanity Check** | Binary questions testing basic scene understanding | *"Are there any stationary vehicles?"* |
+| 📦 **Instance-Grounded** | Questions about specific box-referred objects | *"What type of object is in the red box?"* |
+| 🏃 **Motion Reasoning** | Spatiotemporal understanding across frames | *"Are the ego vehicle and truck on a collision course?"* |
+
+## Quick Start
+
+### Prerequisites
+- Python 3.10
+- Access to Waymo Open Dataset v1.4.3
+
+### Installation
+
+1. **Clone and install requirements:**
+   ```bash
+   git clone https://github.com/your-username/box-qaymo
+   cd box-qaymo
+   pip install -r requirements.txt
+   ```
+
+2. **Download required data:**
+   - Waymo Open Dataset v1.4.3 validation tfrecords
+   - Metadata files from [Google Drive](https://drive.google.com/drive/folders/1hgEu0n3TdDilA0nc01DHFo9I1kNfRNf2?usp=sharing)
+
+3. **Process Waymo data:**
+   ```bash
+   python waymo_extract.py --validation-path /path/to/waymo --output-dir /path/to/output
+   ```
+
+4. **Generate VQA dataset:**
+   ```bash
+   python vqa_generator.py --dataset_path /path/to/output
+   ```
+
+## Dataset Structure
+
+Our three-stage construction methodology:
+
+### 1. Enhanced Object Annotation
+- **Base dataset**: Waymo Open Dataset (superior scene diversity and LiDAR density)
+- **Crowd-sourced labeling**: Fine-grained semantic categories following Argoverse 2.0 taxonomy
+- **Multi-view annotation**: 3×3 object galleries from best visibility crops
+- **Color attributes**: Vehicle color labels for color-based reasoning
+
+### 2. Box-Referring VQA Generation
+- **Visual markers**: Red bounding boxes instead of numerical coordinates
+- **Hierarchical complexity**: From binary questions to complex spatiotemporal reasoning
+- **Motion analysis**: Both implicit (single-frame) and explicit (multi-frame) approaches
+
+### 3. Quality Control & Balancing
+- **Negative sampling**: Balanced positive/negative examples
+- **Temporal consistency**: Logical consistency across frame sequences
+- **Difficulty stratification**: Granular complexity levels
+- **Answer formats**: 2-4 option multiple choice to prevent binary guessing
+
+## Evaluation Framework
+
+Our hierarchical evaluation protocol systematically tests VLM capabilities:
+
 ```
-scene_infos
-    - {scene_id}.json
-
-object_infos
-    - object_{object_id}
-
-camera_images
-    - {scene_id}_{timestamp}_{camera_name}.jpg
-
-point_clouds
-    - {scene_id}_{timestamp}_{lidar_name}.npy
-
+Binary Sanity Checks → Instance-Grounded Questions → Motion Reasoning
+     (Basic VLM)              (Spatial Focus)           (Temporal Understanding)
 ```
 
-### VQA Dataset Generation
+## Model Integration
 
+Evaluate your models using our provided scripts:
+
+```bash
+# LLaVA evaluation
+python llava_predict.py --dataset_path /path/to/data
+
+# Qwen-VL evaluation  
+python qwenvl_predict.py --dataset_path /path/to/data
+
+# Evaluate all models
+python eval_all_csv.py --dataset_path /path/to/data
 ```
-python vqa_generator.py --dataset_path /media/local-data/uqdetche/waymo_vqa
+
+## Key Findings
+
+Our comprehensive evaluation reveals significant limitations in current VLMs:
+- **Spatial referencing**: Models struggle to correctly identify box-referred objects
+- **Fine-grained classification**: Poor performance on detailed object categorization
+- **Motion understanding**: Difficulty with temporal reasoning and trajectory analysis
+- **Real-world gap**: Performance drops significantly under realistic conditions
+
+## Research Applications
+
+Box-QAymo enables research in:
+- **Interpretable autonomous driving** systems
+- **Spatial-aware vision-language models**
+- **Human-AI interaction** in safety-critical domains
+- **Temporal reasoning** in dynamic environments
+- **User intent understanding** through visual references
+
+## Citation
+
+If you use Box-QAymo in your research, please cite:
+
+```bibtex
+@article{box_qaymo_2024,
+  title={Box-QAymo: A Box-Referring VQA Dataset for Spatial and Temporal Reasoning in Autonomous Driving},
+  author={Your Name and Co-authors},
+  journal={arXiv preprint arXiv:XXXX.XXXXX},
+  year={2024}
+}
 ```
 
+## API Reference
 
-## Core Components
+<details>
+<summary>Core Components</summary>
 
-### `Box-QAymo.data`
-Data representation and loading utilities for Waymo dataset.
+### Data Processing
+- `WaymoDatasetLoader`: Extracts and processes Waymo scenes
+- `SceneInfo`: Complete scene representation with temporal data
+- `ObjectInfo`: Enhanced object annotations with fine-grained labels
 
-- **`DataObject`**: Base class for all data objects
-- **`CameraInfo`**: Camera parameters and metadata
-- **`FrameInfo`**: Information about a single frame from a scene
-- **`LaserInfo`**: LiDAR data representation
-- **`ObjectInfo`**: Object information
-- **`SceneInfo`**: Complete scene representation with frames, objects, cameras, lidar etc
-- **`VQADataset`**: Dataset container for VQA tasks
-- **`WaymoDatasetLoader`**: Handles extraction and loading of Waymo data
+### Question Generation
+- `BasePromptGenerator`: Abstract base for question generators
+- `ObjectBinaryPromptGenerator`: Binary sanity check questions
+- `ObjectDrawnBoxPromptGenerator`: Instance-grounded questions
+- `EgoRelativeObjectTrajectoryPromptGenerator`: Motion reasoning questions
 
-### `Box-QAymo.metrics`
-Evaluation metrics for different answer types.
+### Evaluation
+- `MultipleChoiceMetric`: Accuracy, Recall, Precision, F1 evaluation for MCQ
 
-- **`BaseMetric<T>`**: Generic base class for all metrics
-- **`COCOMetric`**: Object detection evaluation using COCO metrics (IoU, mAP)
-- **`COCOEvaluator`**: Higher-level evaluator for COCO metrics across IoU thresholds
-- **`MultipleChoiceMetric`**: Accuracy metrics for multiple-choice answers
-- **`TextSimilarityMetric`**: Advanced NLP-based text similarity metrics
-- **`RougeMetric`**: ROUGE metrics for text comparison
-- **`BERTScoreMetric`**: BERT-based semantic similarity metrics
-- **`SimpleTextSimilarityMetric`**: Lightweight text similarity without dependencies
+</details>
 
-### `Box-QAymo.models`
-Model interfaces and implementations.
+## Contributing
 
-- **`BaseModel`**: Abstract interface for all VQA models
-- **`Grounding2DModel`**: Model for 2D object localization tasks
+We welcome contributions! Areas of particular interest:
+- New question types and complexity levels
+- Additional evaluation metrics
+- Model integration scripts
+- Analysis tools and visualizations
 
-### `Box-QAymo.prompts`
-Prompt generators for different question types.
+## License
 
-- **`BasePromptGenerator`**: Abstract base for all prompt generators
-- **Scene Prompts**:
-  - **`SceneDescriptionPromptGenerator`**: Generates prompts for scene descriptions
-- **Object Prompts**:
-  - **`Grounding2DPromptGenerator`**: Prompts for 2D object localization
-  - **`ObjectColorPromptGenerator`**: Prompts about object colors
-  - **`ObjectLocationPromptGenerator`**: Prompts about object positions
-  - **`ObjectRelationPromptGenerator`**: Prompts about relationships between objects
+MIT License - see [LICENSE](LICENSE) file for details.
 
-### `Box-QAymo.questions`
-Question types and representations.
+**Note**: This project processes data from the Waymo Open Dataset, which requires separate licensing from Waymo.
 
-- **`QuestionType`**: Enumeration of supported question types
-- **`BaseQuestion`**: Abstract base for all question types
-- **`SingleImageQuestion`**: Questions about a single image
-- **`MultipleImageQuestion`**: Questions involving multiple images
-- **`MultiChoiceSingleImageQuestion`**: Multiple-choice questions about a single image
+## Acknowledgments
 
-### `Box-QAymo.answers`
-Answer representations for different question types.
+- Waymo Open Dataset team for providing high-quality autonomous driving data
+- Crowd-sourcing annotators for fine-grained semantic labels
+- Argoverse team for the semantic taxonomy
 
-- **`AnswerType`**: Enumeration of supported answer types
-- **`BaseAnswer`**: Abstract base for all answer types
-- **`Object2DAnswer`**: 2D bounding box answers
-- **`MultiObject2DAnswer`**: Multiple 2D bounding box answers
-- **`MultipleChoiceAnswer`**: Multiple-choice answer representation
-- **`RawTextAnswer`**: Free-form text answers
+---
 
-## Utility Scripts
-
-- **`validate.py`**: Validates model predictions and gt vqa dataset
-- **`vqa_generator.py`**: Generates VQA samples from Waymo data for a given model
-- **`waymo_extract.py`**: Extracts and processes Waymo dataset (preprocessing)
-
-### Scripts Directory
-- **`gdino_predict.py`**: Prediction script using Grounding DINO model
-- **`owlvit_predict.py`**: Prediction script using OWL-ViT model
-- **`senna_predict.py`**: Prediction script using SENNA model
-
-## Data Flow
-
-1. **Data Loading**: `WaymoDatasetLoader` extracts and processes Waymo data into `SceneInfo` objects
-2. **Question Generation**: Prompt generators create questions based on scene information
-3. **Model Execution**: Models process questions and generate answers
-4. **Evaluation**: Metrics evaluate model answers against ground truth
-
-## Extension Points
-
-The framework is designed for extensibility through:
-
-1. **New question types**: Add new classes inheriting from `BaseQuestion`
-2. **New prompt generators**: Create specialized generators for specific question types
-3. **Additional metrics**: Implement custom metrics by extending `BaseMetric`
-4. **Model integration**: Support new models by implementing the `BaseModel` interface
-
-## Configuration
-Configuration files in the `configs/` directory control:
-- Dataset paths and processing parameters
-- Model settings and hyperparameters
-- Evaluation metrics and thresholds
+**🚀 Ready to evaluate your VLM on real-world driving scenarios? Get started with Box-QAymo today!**

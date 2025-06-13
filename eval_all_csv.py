@@ -2034,12 +2034,26 @@ def save_multiframe_comparison_table(comparison_df: pd.DataFrame, save_path: str
 
 
 def main():
-    generated_samples_path = Path(
-        "/media/local-data/uqdetche/waymo_vqa_dataset/generated_vqa_samples/"
+    """Main function to generate and save a VQA dataset."""
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Generate VQA dataset from processed data"
     )
-    model_output_path = Path(
-        "/media/local-data/uqdetche/waymo_vqa_dataset/model_outputs"
+    parser.add_argument(
+        "--dataset_path",
+        type=str,
+        required=True,
+        help="Path to processed waymo dataset",
     )
+    args = parser.parse_args()
+
+    dataset_path = Path(args.dataset_path)
+
+    assert dataset_path.exists()
+
+    generated_samples_path = dataset_path / "generated_vqa_samples"
+    model_output_path = dataset_path / "model_outputs"
 
     model_suffix_map = {
         # "llava-v1.5-7b": "LLaVA",
@@ -2061,7 +2075,6 @@ def main():
     }
 
     save_prefixes = ["26_05_2025_export"]
-    # save_prefixes = ["26_05_2025_export"]
 
     multiframe_df = create_multiframe_comparison_table(
         generated_samples_path, model_output_path, model_suffix_map
