@@ -14,9 +14,9 @@ print("project_root", project_root)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from waymovqa.prompt_generators.base import BasePromptGenerator
-from waymovqa.prompt_generators import get_all_prompt_generators
-from waymovqa.metrics.base import BaseMetric
+from box_qaymo.prompt_generators.base import BasePromptGenerator
+from box_qaymo.prompt_generators import get_all_prompt_generators
+from box_qaymo.metrics.base import BaseMetric
 
 
 class TestPromptGeneratorInterface(unittest.TestCase):
@@ -24,7 +24,7 @@ class TestPromptGeneratorInterface(unittest.TestCase):
 
     def test_all_prompt_generators_have_required_methods(self):
         """
-        Check that all prompt generators in waymovqa/prompt_generators and sub-folders
+        Check that all prompt generators in box_qaymo/prompt_generators and sub-folders
         implement the required methods.
         """
         # Required methods to check
@@ -71,7 +71,7 @@ class TestPromptGeneratorInterface(unittest.TestCase):
 
     def _get_all_generator_classes(self) -> List[type]:
         """
-        Get all prompt generator classes from the waymovqa/prompt_generators directory
+        Get all prompt generator classes from the box_qaymo/prompt_generators directory
         and its subdirectories.
         """
         # Use the registry if available
@@ -81,7 +81,7 @@ class TestPromptGeneratorInterface(unittest.TestCase):
 
         # If registry is not available or empty, discover classes by scanning directories
         generators = []
-        prompt_generators_dir = Path(project_root) / "waymovqa" / "prompt_generators"
+        prompt_generators_dir = Path(project_root) / "box_qaymo" / "prompt_generators"
 
         # Walk through all subdirectories
         for root, dirs, files in os.walk(prompt_generators_dir):

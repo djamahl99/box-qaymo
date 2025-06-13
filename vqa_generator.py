@@ -8,19 +8,19 @@ import cv2
 from collections import defaultdict
 from abc import ABC, abstractmethod
 
-from waymovqa.answers.multiple_choice import MultipleChoiceAnswer
-from waymovqa.data.frame_info import FrameInfo
-from waymovqa.data.object_info import ObjectInfo
-from waymovqa.waymo_loader import WaymoDatasetLoader
-from waymovqa.prompt_generators import (
+from box_qaymo.answers.multiple_choice import MultipleChoiceAnswer
+from box_qaymo.data.frame_info import FrameInfo
+from box_qaymo.data.object_info import ObjectInfo
+from box_qaymo.waymo_loader import WaymoDatasetLoader
+from box_qaymo.prompt_generators import (
     get_all_prompt_generators,
     get_prompt_generator,
     BasePromptGenerator,
 )
-from waymovqa.models import MODEL_REGISTRY
-from waymovqa.models.base import BaseModel
+from box_qaymo.models import MODEL_REGISTRY
+from box_qaymo.models.base import BaseModel
 
-from waymovqa.data.vqa_dataset import VQADataset
+from box_qaymo.data.vqa_dataset import VQADataset
 from tqdm import tqdm
 
 

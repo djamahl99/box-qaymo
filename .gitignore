@@ -10,3 +10,4 @@ figures/
 *.json
 *.csv
 wandb/
+category_datasets/

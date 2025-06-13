@@ -1,4 +1,4 @@
-from waymovqa.answers.object_2d import Object2DAnswer
+from box_qaymo.answers.object_2d import Object2DAnswer
 from .base import BaseAnswer
 from .base import AnswerType
 import json

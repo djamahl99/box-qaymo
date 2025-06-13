@@ -3,13 +3,13 @@ from typing import Dict, Any, List, Union, Type, TypeVar, Generic, Optional, Tup
 
 import numpy as np
 
-from waymovqa.data.scene_info import SceneInfo
-from waymovqa.data.object_info import ObjectInfo
-from waymovqa.data.frame_info import FrameInfo
-from waymovqa.data.camera_info import CameraInfo
-from waymovqa.data.laser_info import LaserInfo
-from waymovqa.answers import BaseAnswer
-from waymovqa.questions import BaseQuestion
+from box_qaymo.data.scene_info import SceneInfo
+from box_qaymo.data.object_info import ObjectInfo
+from box_qaymo.data.frame_info import FrameInfo
+from box_qaymo.data.camera_info import CameraInfo
+from box_qaymo.data.laser_info import LaserInfo
+from box_qaymo.answers import BaseAnswer
+from box_qaymo.questions import BaseQuestion
 
 # Update BasePromptGenerator with typing information
 TQ = TypeVar("TQ", bound=BaseAnswer)

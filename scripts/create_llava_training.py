@@ -3,11 +3,11 @@ import random
 from pathlib import Path
 from typing import List, Dict, Any
 
-from waymovqa.data.vqa_dataset import VQADataset
-from waymovqa.questions import *
-from waymovqa.answers.multiple_choice import MultipleChoiceAnswer
-from waymovqa.questions.multi_image_multi_choice import MultipleImageMultipleChoiceQuestion
-from waymovqa.questions.multi_image import MultipleImageQuestion
+from box_qaymo.data.vqa_dataset import VQADataset
+from box_qaymo.questions import *
+from box_qaymo.answers.multiple_choice import MultipleChoiceAnswer
+from box_qaymo.questions.multi_image_multi_choice import MultipleImageMultipleChoiceQuestion
+from box_qaymo.questions.multi_image import MultipleImageQuestion
 
 def convert_vqa_to_llava_format(vqa_dataset, output_path: str):
     """

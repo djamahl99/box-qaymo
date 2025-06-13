@@ -2,7 +2,7 @@ from typing import List
 from pydantic import BaseModel
 from .base import BaseQuestion, QuestionType
 
-from waymovqa.answers.base import BaseAnswer
+from box_qaymo.answers.base import BaseAnswer
 
 
 class PromptEntry(BaseModel):

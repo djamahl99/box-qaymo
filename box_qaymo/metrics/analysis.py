@@ -8,9 +8,9 @@ import importlib
 import os
 from collections import defaultdict
 
-from waymovqa.data.vqa_dataset import VQASample
-from waymovqa.questions.base import BaseQuestion
-from waymovqa.waymo_loader import WaymoDatasetLoader
+from box_qaymo.data.vqa_dataset import VQASample
+from box_qaymo.questions.base import BaseQuestion
+from box_qaymo.waymo_loader import WaymoDatasetLoader
 
 
 def create_confusion_matrix_plotly(
@@ -276,7 +276,7 @@ def visualize_failure_samples(
     Visualize samples for a specific failure pattern.
 
     Args:
-        failure_pattern: Tuple from find_common_failures (gt, pred, count, samples)
+        failure_pattern: Tuple from find_common_failures (gt, pred, count)
         questions_data: List of original question objects/dicts
         answers_data: List of original answer objects/dicts
         output_dir: Directory to save visualizations
@@ -312,9 +312,9 @@ def visualize_failure_samples(
     sampled = 0
     
     # import here to avoid circular import
-    from waymovqa.metrics.multiple_choice import MultipleChoiceMetric
-    from waymovqa.answers.multiple_choice import MultipleChoiceAnswer
-    from waymovqa.answers.raw_text import RawTextAnswer
+    from box_qaymo.metrics.multiple_choice import MultipleChoiceMetric
+    from box_qaymo.answers.multiple_choice import MultipleChoiceAnswer
+    from box_qaymo.answers.raw_text import RawTextAnswer
 
     for question_obj, gt_answer, pred_answer in zip(
         questions_list, gt_answers, pred_answers

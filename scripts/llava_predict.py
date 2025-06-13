@@ -5,8 +5,8 @@ from tqdm import tqdm
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from waymovqa.answers.base import BaseAnswer
-from waymovqa.questions.multi_image_multi_choice import (
+from box_qaymo.answers.base import BaseAnswer
+from box_qaymo.questions.multi_image_multi_choice import (
     MultipleImageMultipleChoiceQuestion,
 )
 import random
@@ -19,19 +19,19 @@ import pprint
 import re
 
 
-from waymovqa.data.vqa_dataset import VQADataset
-from waymovqa.questions import *
-from waymovqa.answers.multiple_choice import MultipleChoiceAnswer
-from waymovqa.answers.raw_text import RawTextAnswer
-from waymovqa.metrics.multiple_choice import MultipleChoiceMetric
-from waymovqa.questions.single_image import SingleImageQuestion
-from waymovqa.questions.single_image_multi_prompt import (
+from box_qaymo.data.vqa_dataset import VQADataset
+from box_qaymo.questions import *
+from box_qaymo.answers.multiple_choice import MultipleChoiceAnswer
+from box_qaymo.answers.raw_text import RawTextAnswer
+from box_qaymo.metrics.multiple_choice import MultipleChoiceMetric
+from box_qaymo.questions.single_image import SingleImageQuestion
+from box_qaymo.questions.single_image_multi_prompt import (
     SingleImageMultiplePromptQuestion,
 )
-from waymovqa.questions.single_image_multi_choice import (
+from box_qaymo.questions.single_image_multi_choice import (
     SingleImageMultipleChoiceQuestion,
 )
-from waymovqa.questions.multi_image import MultipleImageQuestion
+from box_qaymo.questions.multi_image import MultipleImageQuestion
 
 from transformers import AutoTokenizer
 import torch

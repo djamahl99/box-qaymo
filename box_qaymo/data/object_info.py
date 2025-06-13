@@ -4,14 +4,14 @@ import json
 import numpy as np
 from enum import Enum
 
-from waymovqa.data.base import DataObject
+from box_qaymo.data.base import DataObject
 
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from waymovqa.data.frame_info import FrameInfo  # No circular import at runtime
-    from waymovqa.data.camera_info import CameraInfo
-    from waymovqa.data.scene_info import SceneInfo
+    from box_qaymo.data.frame_info import FrameInfo  # No circular import at runtime
+    from box_qaymo.data.camera_info import CameraInfo
+    from box_qaymo.data.scene_info import SceneInfo
 
 WAYMO_TYPE_MAPPING = {
     "TYPE_UNKNOWN": None,

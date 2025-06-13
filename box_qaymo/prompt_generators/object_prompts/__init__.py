@@ -1,5 +1,5 @@
 # Import the necessary utilities first
-from waymovqa.prompt_generators import register_prompt_generator
+from box_qaymo.prompt_generators import register_prompt_generator
 
 # Then import your modules
 from .object_binary import ObjectBinaryPromptGenerator

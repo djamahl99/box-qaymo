@@ -1,4 +1,4 @@
-from waymovqa.waymo_loader import WaymoDatasetLoader
+from box_qaymo.waymo_loader import WaymoDatasetLoader
 import random
 from pathlib import Path
 

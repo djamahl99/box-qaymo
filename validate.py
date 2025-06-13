@@ -1,6 +1,6 @@
 import argparse
 
-from waymovqa.data.vqa_dataset import VQADataset
+from box_qaymo.data.vqa_dataset import VQADataset
 
 
 def main():

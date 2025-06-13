@@ -14,7 +14,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 import torch
 
 from .base import BaseMetric
-from waymovqa.answers.raw_text import RawTextAnswer
+from box_qaymo.answers.raw_text import RawTextAnswer
 
 
 class TextSimilarityMetric(BaseMetric[RawTextAnswer]):

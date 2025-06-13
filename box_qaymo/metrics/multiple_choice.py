@@ -4,15 +4,15 @@ from typing import Dict, Any, List, Union
 
 from pathlib import Path
 
-from waymovqa.metrics.analysis import create_confusion_matrix_plotly
-from waymovqa.questions.single_image_multi_choice import (
+from box_qaymo.metrics.analysis import create_confusion_matrix_plotly
+from box_qaymo.questions.single_image_multi_choice import (
     SingleImageMultipleChoiceQuestion,
 )
-from waymovqa.questions.multi_image_multi_choice import (
+from box_qaymo.questions.multi_image_multi_choice import (
     MultipleImageMultipleChoiceQuestion,
 )
-from waymovqa.answers.multiple_choice import MultipleChoiceAnswer
-from waymovqa.answers.raw_text import RawTextAnswer
+from box_qaymo.answers.multiple_choice import MultipleChoiceAnswer
+from box_qaymo.answers.raw_text import RawTextAnswer
 
 from .base import BaseMetric
 
@@ -189,23 +189,25 @@ class MultipleChoiceMetric(BaseMetric[MultipleChoiceAnswer]):
 
         # Question type mappings based on your templates
         self.question_type_mappings = {
-            # Temporal Trajectory Questions
-            "_prompt_faster_than_ego": ("motion", "Ego Relative Speed"),
-            "_prompt_moving_towards_ego": ("motion", "Approach/Divergence"),
-            "_prompt_parallel_motion": ("motion", "Parallel/Perpendicular"),
-            "_prompt_approaching_stop_sign": ("motion", "Approaching Stop Sign"),
-            "_prompt_vehicle_future_path": ("motion", "Ego Collision Prediction"),
-            "_prompt_ego_following": ("motion", "Following Behavior"),
-            # Instance-Referenced Questions (with bounding boxes)
-            "_color_prompt": ("attribute", "Color"),
-            "_label_prompt": ("attribute", "Object Type"),
-            "_heading_prompt": ("attribute", "Orientation"),
-            "_speed_prompt": ("motion", "Object Speed"),
-            "_movement_direction_prompt": ("attribute", "Movement Direction"),
             # Binary Characteristic Questions
-            "_object_facing_type": ("binary", "Facing Direction"),
-            "_object_movement_direction_type": ("binary", "Movement Direction"),
-            # Speed category questions will be detected by pattern matching
+            "_object_movement_direction_type": ("binary", "Movement Status"),
+            "_object_facing_type": ("binary", "Orientation"),
+            
+            # Instance-Referenced Questions (with bounding boxes)
+            "_label_prompt": ("attribute", "Fine-grained Classification"),
+            "_color_prompt": ("attribute", "Color Recognition"),
+            "_heading_prompt": ("attribute", "Facing Direction"),
+            
+            # Temporal Trajectory Questions
+            "_speed_prompt": ("motion", "Speed Assessment"),
+            "_movement_direction_prompt": ("motion", "Movement Direction"),
+            "_prompt_faster_than_ego": ("motion", "Relative Motion Analysis"),
+            "_prompt_approaching_stop_sign": ("motion", "Traffic Element Recognition"),
+            "_prompt_moving_towards_ego": ("motion", "Trajectory Analysis"),
+            "_prompt_parallel_motion": ("motion", "Relative Motion Direction"),
+            "_prompt_vehicle_future_path": ("motion", "Path Conflict Detection"),
+            # "_prompt_ego_following": ("motion", "Following Behavior"),
+            
         }
 
         self.invalid_responses = defaultdict(int)
@@ -217,7 +219,7 @@ class MultipleChoiceMetric(BaseMetric[MultipleChoiceAnswer]):
         if question_name in self.question_type_mappings:
             return self.question_type_mappings[question_name]
 
-        return ("other", "Unknown")
+        raise ValueError(f"question_name={question_name} is not a valid value.")
 
     @staticmethod
     def compute_text_similarity(text1: str, text2: str) -> float:
@@ -690,10 +692,12 @@ class MultipleChoiceMetric(BaseMetric[MultipleChoiceAnswer]):
 
         # Group results by question type and subtype
         subtype_groups = defaultdict(list)
+        # hierarchy_subtype_groups = defaultdict(list)
 
         for result in metric_results:
             main_type, sub_type = self._classify_question_type(result["question_name"])
             subtype_groups[(main_type, sub_type)].append(result)
+            # hierarchy_subtype_groups[main_type].append(result)
 
         tables = {}
 
@@ -703,8 +707,11 @@ class MultipleChoiceMetric(BaseMetric[MultipleChoiceAnswer]):
         macro_precision = overall_summary["macro_metrics"]["macro_precision"] * 100
         macro_recall = overall_summary["macro_metrics"]["macro_recall"] * 100
         macro_f1 = overall_summary["macro_metrics"]["macro_f1"] * 100
-
+        
         tables["overall"] = [(model_name, macro_precision, macro_recall, macro_f1)]
+        # tables["overall"] += self._generate_overall_values(
+        #     hierarchy_subtype_groups, model_name
+        # )
 
         tables["binary"] = self._generate_subtype_values(
             subtype_groups, "binary", model_name
@@ -717,6 +724,28 @@ class MultipleChoiceMetric(BaseMetric[MultipleChoiceAnswer]):
         )
 
         return tables
+
+    def _generate_overall_values(
+        self,
+        subtype_groups: Dict[tuple, List[Dict]],
+        model_name: str,
+    ):
+        """Generate subtype performance rows for a given question type."""
+        rows = []
+
+        for hierarchy_type in subtype_groups.keys():
+            subtype_summary = self.summarise(subtype_groups[hierarchy_type])
+            macro_precision = (
+                subtype_summary["macro_metrics"]["macro_precision"] * 100
+            )
+            macro_recall = subtype_summary["macro_metrics"]["macro_recall"] * 100
+            macro_f1 = subtype_summary["macro_metrics"]["macro_f1"] * 100
+
+            rows.append(
+                (model_name, hierarchy_type, macro_precision, macro_recall, macro_f1)
+            )
+
+        return rows
 
     def _generate_subtype_values(
         self,

@@ -11,30 +11,30 @@ import base64
 from enum import Enum
 from io import BytesIO
 
-from waymovqa.answers.multiple_choice import MultipleChoiceAnswer
-from waymovqa.questions.single_image_multi_choice import (
+from box_qaymo.answers.multiple_choice import MultipleChoiceAnswer
+from box_qaymo.questions.single_image_multi_choice import (
     SingleImageMultipleChoiceQuestion,
 )
-from waymovqa.data.scene_info import SceneInfo
-from waymovqa.data.object_info import (
+from box_qaymo.data.scene_info import SceneInfo
+from box_qaymo.data.object_info import (
     OBJECT_SPEED_CATS,
     HeadingType,
     MovementType,
     ObjectInfo,
 )
-from waymovqa.data.frame_info import FrameInfo
-from waymovqa.data.camera_info import CameraInfo
-from waymovqa.data.laser_info import LaserInfo
-from waymovqa.prompt_generators.base import BasePromptGenerator
-from waymovqa.prompt_generators import register_prompt_generator
+from box_qaymo.data.frame_info import FrameInfo
+from box_qaymo.data.camera_info import CameraInfo
+from box_qaymo.data.laser_info import LaserInfo
+from box_qaymo.prompt_generators.base import BasePromptGenerator
+from box_qaymo.prompt_generators import register_prompt_generator
 
-from waymovqa.data.visualise import (
+from box_qaymo.data.visualise import (
     draw_3d_wireframe_box_cv,
     generate_object_depth_buffer,
 )
-from waymovqa.primitives import colors as labelled_colors
-from waymovqa.primitives import labels as finegrained_labels
-from waymovqa.primitives import CHOICES_OPTIONS
+from box_qaymo.primitives import colors as labelled_colors
+from box_qaymo.primitives import labels as finegrained_labels
+from box_qaymo.primitives import CHOICES_OPTIONS
 
 OBJECT_COLOR = (0, 0, 255)
 OBJECT_COLOR_TEXT = "red"
@@ -251,7 +251,7 @@ class ObjectDrawnBoxPromptGenerator(BasePromptGenerator):
 
         return samples
 
-    def visualise_sample(
+    def visualise_sample_matplotlib(
         self,
         question_obj: SingleImageMultipleChoiceQuestion,
         answer_obj: MultipleChoiceAnswer,
@@ -397,6 +397,155 @@ class ObjectDrawnBoxPromptGenerator(BasePromptGenerator):
         save_path.parent.mkdir(parents=True, exist_ok=True)
         plt.savefig(save_path, dpi=dpi, bbox_inches="tight", facecolor="white")
         plt.close()
+    
+
+    def visualise_sample(
+        self,
+        question_obj: SingleImageMultipleChoiceQuestion,
+        answer_obj: MultipleChoiceAnswer,
+        save_path,
+        frames,
+        pred_answer_obj: Optional[MultipleChoiceAnswer] = None,
+        extra_text="",
+        figsize=(12, 8),
+        box_color="green",
+        text_fontsize=12,
+        title_fontsize=14,
+        dpi=150,
+    ):
+        """
+        Minimal Plotly visualization showing question, multiple choices, and image with bounding box.
+        
+        Args:
+            question_obj: Question object with image_path, question text, and optional bbox data
+            answer_obj: Answer object with choices and correct answer
+            save_path: Path to save the visualization
+            pred_answer_obj: Optional prediction answer object
+        """
+        import plotly.graph_objects as go
+        from PIL import Image
+        import textwrap
+        from typing import Optional
+        # Load image
+        try:
+            img = Image.open(question_obj.image_path)
+            width, height = img.size
+        except Exception as e:
+            # Create a placeholder if image can't be loaded
+            img = Image.new('RGB', (600, 400), color='white')
+            width, height = img.size
+        
+        # Create figure
+        fig = go.Figure()
+        
+        # Add image
+        fig.add_layout_image(
+            dict(
+                source=img,
+                xref="x",
+                yref="y",
+                x=0,
+                y=height,
+                sizex=width,
+                sizey=height,
+                sizing="stretch",
+                layer="below"
+            )
+        )
+        
+        # Add bounding box if available
+        if isinstance(question_obj.data, dict) and "bbox" in question_obj.data:
+            x1, y1, x2, y2 = question_obj.data['bbox']
+            fig.add_shape(
+                type="rect",
+                x0=x1, y0=height-y2,  # Flip y-coordinate for plotly
+                x1=x2, y1=height-y1,
+                line=dict(color="red", width=3),
+                fillcolor="rgba(0,0,0,0)"  # No fill
+            )
+        
+        # Add question text at top
+        question_text = textwrap.fill(question_obj.question, width=60)
+        fig.add_annotation(
+            text=f"Q: {question_text}",
+            xref="paper", yref="paper",
+            x=0.02, y=0.98,
+            xanchor="left", yanchor="top",
+            showarrow=False,
+            font=dict(size=48, color="black", family="Arial Black"),
+            bgcolor="rgba(255,255,255,0.9)",
+            bordercolor="white",
+            borderwidth=1
+        )
+        
+        # Display choices
+        pred_answer_text = pred_answer_obj.get_answer_text() if pred_answer_obj else None
+        correct_answer = answer_obj.answer
+        
+        for idx, choice in enumerate(answer_obj.choices):
+            # Determine styling based on correctness and prediction
+            is_correct = (choice == correct_answer)
+            is_predicted = (choice == pred_answer_text)
+            
+            if is_correct and is_predicted:
+                # Correct prediction
+                choice_text = f"✓ {choice}"
+                bg_color = "rgba(0,128,0,0.8)"  # Green
+                text_color = "white"
+            elif is_correct and not is_predicted:
+                # Correct but not predicted
+                choice_text = f"{choice}"
+                bg_color = "rgba(144,238,144,0.8)"  # Light green
+                text_color = "darkgreen"
+            elif not is_correct and is_predicted:
+                # Incorrect prediction
+                choice_text = f"✗ {choice}"
+                bg_color = "rgba(255,0,0,0.8)"  # Red
+                text_color = "white"
+            else:
+                # Not correct, not predicted
+                choice_text = f"{choice}"
+                bg_color = "rgba(240,128,128,0.8)"  # Light coral
+                text_color = "darkred"
+            
+            # Add choice annotation
+            fig.add_annotation(
+                text=choice_text,
+                xref="paper", yref="paper",
+                x=0.02, y=0.02 + idx * 0.08,  # Stack choices from bottom
+                xanchor="left", yanchor="bottom",
+                showarrow=False,
+                font=dict(size=48, color=text_color, family="Arial Black"),
+                bgcolor=bg_color,
+                bordercolor=text_color,
+                borderwidth=2
+            )
+        
+        # Update layout for minimal appearance
+        fig.update_layout(
+            width=width,
+            height=height,
+            margin=dict(l=0, r=0, t=0, b=0),
+            xaxis=dict(
+                showgrid=False,
+                showticklabels=False,
+                zeroline=False,
+                range=[0, width]
+            ),
+            yaxis=dict(
+                showgrid=False,
+                showticklabels=False,
+                zeroline=False,
+                range=[0, height],
+                scaleanchor="x",
+                scaleratio=1
+            ),
+            plot_bgcolor="white",
+            paper_bgcolor="white"
+        )
+        
+        # Save the figure
+        fig.write_image(save_path)
 
     def get_metric_class(self) -> str:
         return "MultipleChoiceMetric"

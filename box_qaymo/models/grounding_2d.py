@@ -14,12 +14,12 @@ from typing import (
 from pathlib import Path
 import json
 
-from waymovqa.models.base import BaseModel
-from waymovqa.questions.single_image_single_object import (
+from box_qaymo.models.base import BaseModel
+from box_qaymo.questions.single_image_single_object import (
     SingleImageSingleObjectQuestion,
 )
-from waymovqa.answers.object_2d import Object2DAnswer
-from waymovqa.metrics.coco import COCOMetric
+from box_qaymo.answers.object_2d import Object2DAnswer
+from box_qaymo.metrics.coco import COCOMetric
 
 
 class Grounding2DModel(ABC):

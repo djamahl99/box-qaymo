@@ -12,19 +12,19 @@ import re
 import json
 import cv2
 
-from waymovqa.data.vqa_dataset import VQADataset
-from waymovqa.questions import *
-from waymovqa.answers.base import BaseAnswer
-from waymovqa.answers.multiple_choice import MultipleChoiceAnswer
-from waymovqa.metrics.multiple_choice import MultipleChoiceMetric
-from waymovqa.answers.raw_text import RawTextAnswer
-from waymovqa.questions.single_image import SingleImageQuestion
-from waymovqa.questions.single_image_multi_prompt import SingleImageMultiplePromptQuestion
-from waymovqa.questions.single_image_multi_choice import SingleBase64ImageMultipleChoiceQuestion
-from waymovqa.questions.single_image_multi_choice import SingleImageMultipleChoiceQuestion
-from waymovqa.questions.multi_image import MultipleImageQuestion
-from waymovqa.questions.multi_image_multi_choice import MultipleImageMultipleChoiceQuestion
-from waymovqa.questions.multi_frame_multi_choice import MultipleFrameMultipleChoiceQuestion
+from box_qaymo.data.vqa_dataset import VQADataset
+from box_qaymo.questions import *
+from box_qaymo.answers.base import BaseAnswer
+from box_qaymo.answers.multiple_choice import MultipleChoiceAnswer
+from box_qaymo.metrics.multiple_choice import MultipleChoiceMetric
+from box_qaymo.answers.raw_text import RawTextAnswer
+from box_qaymo.questions.single_image import SingleImageQuestion
+from box_qaymo.questions.single_image_multi_prompt import SingleImageMultiplePromptQuestion
+from box_qaymo.questions.single_image_multi_choice import SingleBase64ImageMultipleChoiceQuestion
+from box_qaymo.questions.single_image_multi_choice import SingleImageMultipleChoiceQuestion
+from box_qaymo.questions.multi_image import MultipleImageQuestion
+from box_qaymo.questions.multi_image_multi_choice import MultipleImageMultipleChoiceQuestion
+from box_qaymo.questions.multi_frame_multi_choice import MultipleFrameMultipleChoiceQuestion
 
 from transformers import AutoTokenizer
 import torch

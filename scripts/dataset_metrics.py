@@ -8,8 +8,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import json
 from pathlib import Path
 
-from waymovqa.data.vqa_dataset import VQADataset
-from waymovqa.metrics.multiple_choice import MultipleChoiceMetric
+from box_qaymo.data.vqa_dataset import VQADataset
+from box_qaymo.metrics.multiple_choice import MultipleChoiceMetric
 import random
 
 from collections import defaultdict
@@ -20,32 +20,13 @@ from plotly.subplots import make_subplots
 import pandas as pd
 from collections import defaultdict
 import numpy as np
+import plotly.io as pio
 
+pio.kaleido.scope.mathjax = None
 
 # Question type mappings based on your templates
-# metric = MultipleChoiceMetric()
-# question_type_mappings = metric.question_type_mappings
-    
-question_type_mappings = {
-    # Temporal Trajectory Questions
-    "_prompt_faster_than_ego": ("motion", "Ego Relative Speed"),
-    "_prompt_moving_towards_ego": ("motion", "Approach.."),
-    "_prompt_parallel_motion": ("motion", "Parallel.."),
-    "_prompt_approaching_stop_sign": ("motion", "Approaching Stop Sign"),
-    "_prompt_vehicle_future_path": ("motion", "Ego Collision Prediction"),
-    "_prompt_ego_following": ("motion", "Following Behavior"),
-    "_movement_direction_prompt": ("motion", "Movement Direction"),
-    "_speed_prompt": ("motion", "Object Speed"),
-
-    # Instance-Referenced Questions (with bounding boxes)
-    "_color_prompt": ("attribute", "Color"),
-    "_label_prompt": ("attribute", "Object Type"),
-    "_heading_prompt": ("attribute", "Orientation"),
-    # Binary Characteristic Questions
-    "_object_facing_type": ("binary", "Facing Direction"),
-    "_object_movement_direction_type": ("binary", "Movement Direction"),
-    # Speed category questions will be detected by pattern matching
-}
+metric = MultipleChoiceMetric()
+question_type_mappings = metric.question_type_mappings
     
 def create_improved_log_scale(data):
     """Improved log scale with better text handling and spacing"""
@@ -228,6 +209,373 @@ def create_horizontal_log_scale(data):
     
     return fig
 
+def create_question_treemap(count_per_question_type):
+    labels, parents, values, colors = [], [], [], []
+    
+    # Add root
+    labels.append("All Questions")
+    parents.append("")
+    values.append(sum(sum(counts.values()) for counts in count_per_question_type.values()))
+    colors.append(0)
+    
+    # Add data
+    for hierarchy, questions in count_per_question_type.items():
+        for q_type, count in questions.items():
+            labels.append(f"{q_type}<br>({count:,})")
+            parents.append("All Questions")
+            values.append(count)
+            colors.append(count)
+    
+    return go.Figure(go.Treemap(
+        labels=labels,
+        parents=parents,
+        values=values,
+        marker_colorscale="Viridis"
+    ))
+
+def  create_grouped_bars(count_per_question_type):
+    fig = go.Figure()
+    colors = {'motion': '#9c27b0', 'attribute': '#4caf50', 'binary': '#2196f3'}
+    
+    for hierarchy, questions in count_per_question_type.items():
+        fig.add_trace(go.Bar(
+            name=hierarchy.title(),
+            x=list(questions.keys()),
+            y=list(questions.values()),
+            marker_color=colors[hierarchy.lower()],
+            text=[f'{v:,}' for v in questions.values()],
+            textposition='auto'
+        ))
+    
+    fig.update_layout(
+        font=dict(size=16, family='Arial'),
+        paper_bgcolor='rgba(255,255,255,1)',
+        plot_bgcolor='rgba(255,255,255,1)',
+        height=900,  # Increased to accommodate perimeter labels
+        width=900,
+        margin=dict(t=40, b=40, l=40, r=40),  # Increased margins
+        # annotations=annotations
+    )
+    return fig
+
+def save_bar_chart(df: pd.DataFrame, save_path: str):
+    """Generate professional bar charts suitable for academic papers (CVPR/ICCV style)"""
+
+    if "Category" not in df.keys():
+        return
+
+    df = df.copy()
+
+    # Replace model name (your existing code)
+    actual_model_col = None
+    for col in df.columns:
+        if col.lower() == "model":
+            actual_model_col = col
+            break
+    if actual_model_col:
+        df[actual_model_col] = df[actual_model_col].str.replace(
+            "\\textsuperscript{\\textdagger}", "†", regex=False
+        )
+
+    # Filter out unwanted categories
+    df = df[df["Category"] != "overall"].copy()
+    df["Category"] = df["Category"].str.title()
+    
+    # Professional color palette (more muted, academic-friendly)
+    # Using colorbrewer colors that work well in print
+    academic_colors = [
+        "#1f77b4",  # Blue
+        "#ff7f0e",  # Orange
+        "#2ca02c",  # Green
+        "#d62728",  # Red
+        "#9467bd",  # Purple
+        "#8c564b",  # Brown
+        "#e377c2",  # Pink
+        "#7f7f7f",  # Gray
+        "#bcbd22",  # Olive
+        "#17becf",  # Cyan
+    ]
+
+    models = df["Model"].unique()
+    model_colors = {
+        model: academic_colors[i % len(academic_colors)]
+        for i, model in enumerate(models)
+    }
+
+    # Define custom category order
+    category_order = ["Binary", "Attribute", "Motion"]
+    
+    # Filter dataframe to only include categories we want, in the order we want
+    df = df[df["Category"].isin(category_order)].copy()
+    
+    # Convert Category to categorical with specified order
+    df["Category"] = pd.Categorical(df["Category"], categories=category_order, ordered=True)
+
+    # Create the bar chart
+    fig = go.Figure()
+
+    for model in models:
+        model_df = df[df["Model"] == model].copy()
+
+        # Group by category and get mean F1 score (in case of multiple entries per category)
+        category_f1 = model_df.groupby("Category", observed=True)["F1"].mean()
+        
+        # Sort by the categorical order
+        category_f1 = category_f1.sort_index()
+
+        fig.add_trace(
+            go.Bar(
+                x=[str(cat) for cat in category_f1.index],  # Convert to string for Plotly
+                y=category_f1.values,
+                name=model,
+                marker_color=model_colors[model],
+                marker_line=dict(color="white", width=0.5),  # Subtle white borders
+                opacity=0.85,
+            )
+        )
+
+    # Professional academic styling
+    fig.update_layout(
+        # Remove title - will be added in LaTeX
+        title=None,
+        # Axis styling
+        xaxis=dict(
+            title="",
+            title_font=dict(size=14, family="Arial, sans-serif"),
+            tickfont=dict(size=12, family="Arial, sans-serif"),
+            linecolor="black",
+            linewidth=1,
+            mirror=True,
+            ticks="outside",
+            tickwidth=1,
+            ticklen=5,
+
+        ),
+        yaxis=dict(
+            title="F1 Score (%)",
+            title_font=dict(size=14, family="Arial, sans-serif"),
+            tickfont=dict(size=12, family="Arial, sans-serif"),
+            linecolor="black",
+            linewidth=1,
+            mirror=True,
+            ticks="outside",
+            tickwidth=1,
+            ticklen=5,
+            gridcolor="lightgray",
+            gridwidth=0.5,
+            zeroline=True,
+            zerolinecolor="black",
+            zerolinewidth=1,
+        ),
+        # Bar grouping
+        barmode="group",
+        bargap=0.15,  # Gap between groups
+        bargroupgap=0.1,  # Gap between bars in group
+        # Legend styling
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.15,  # Tighter positioning
+            xanchor="center",
+            x=0.5,
+            font=dict(size=11, family="Arial, sans-serif"),
+            bgcolor="rgba(0,0,0,0)",  # Transparent background
+            bordercolor="black",
+            borderwidth=0,
+        ),
+        # Overall layout
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        # Tighter margins for academic papers
+        margin=dict(
+            l=60,  # Left margin
+            r=20,  # Right margin
+            t=20,  # Top margin (small since no title)
+            b=80,  # Bottom margin (space for legend)
+        ),
+        # Professional dimensions (good for 2-column papers)
+        height=300,  # Shorter height
+        width=500,  # Narrower width
+        # Font settings
+        font=dict(family="Arial, sans-serif", size=12, color="black"),
+    )
+
+    # Add subtle grid
+    fig.update_xaxes(showgrid=False)
+    fig.update_yaxes(showgrid=True, gridcolor="lightgray", gridwidth=0.5)
+
+    # Save with high DPI for publication quality
+    save_path = Path(save_path).with_suffix(".pdf")
+    fig.write_image(
+        save_path,
+        width=500,
+        height=300,
+        scale=3,  # Higher scale for better quality
+        format="pdf",  # PDF is preferred for LaTeX
+    )
+    print(f"Professional bar chart saved to: {save_path}")
+
+def create_question_hierarchy_bars(count_per_question_type):
+    """Create a professional horizontal bar chart showing question type hierarchy"""
+    
+    fig = go.Figure()
+    
+    # Professional color palette with better contrast
+    colors = {
+        'binary': '#2196f3',
+        'attribute': '#4caf50', 
+        'motion': '#9c27b0',
+    }
+
+    # Calculate total for percentages
+    total = sum(sum(counts.values()) for counts in count_per_question_type.values())
+    
+    # Prepare data with better organization
+    y_labels = []
+    values = []
+    bar_colors = []
+    hover_texts = []
+    
+    # Sort hierarchy categories by total count (largest first)
+    sorted_hierarchies = sorted(
+        count_per_question_type.items(), 
+        key=lambda x: sum(x[1].values()), 
+        reverse=True
+    )
+    
+    for hierarchy, questions in sorted_hierarchies:
+        # Sort questions within each hierarchy by count (largest first)
+        sorted_questions = sorted(questions.items(), key=lambda x: x[1], reverse=True)
+        
+        for q_type, count in sorted_questions:
+            # Clean label formatting
+            label = f"{hierarchy.title()}: {q_type.title()}"
+            y_labels.append(label)
+            values.append(count)
+            import matplotlib.colors as mcolors
+            
+            # Convert hex to RGBA with 60% opacity
+            base_color = colors[hierarchy.lower()]
+            rgba_color = mcolors.to_rgba(base_color, alpha=0.6)
+            rgba_string = f'rgba({int(rgba_color[0]*255)},{int(rgba_color[1]*255)},{int(rgba_color[2]*255)},{rgba_color[3]})'
+            bar_colors.append(rgba_string)
+            # bar_colors.append(colors[hierarchy.lower()])
+            
+            # Rich hover text
+            percentage = (count / total) * 100
+            hover_text = f"<b>{q_type.title()}</b><br>" + \
+                        f"Category: {hierarchy.title()}<br>" + \
+                        f"Count: {count:,}<br>" + \
+                        f"Percentage: {percentage:.1f}%"
+            hover_texts.append(hover_text)
+    
+    # Create the bar chart
+    fig.add_trace(go.Bar(
+        x=values,
+        y=y_labels,
+        orientation='h',
+        marker=dict(
+            color=bar_colors,
+            line=dict(color='black', width=1)
+        ),
+        # text=[f'{v:,}<br>({v/total*100:.1f}%)' for v in values],
+        text=[f'{v/total*100:.1f}%' for v in values],
+        # text=[f'{v:,}' for v in values],
+
+        textposition='auto',
+        textfont=dict(size=20, color='black', family='Arial Black'),
+        hovertemplate='%{customdata}<extra></extra>',
+        customdata=hover_texts,
+        name=""  # Remove legend
+    ))
+    
+    # Professional styling
+    fig.update_layout(
+        # title=dict(
+        #     text="<b>Question Distribution by Type and Category</b>",
+        #     font=dict(size=24, color='#1f2937', family='Inter'),
+        #     x=0.5,
+        #     xanchor='center',
+        #     pad=dict(t=20, b=20)
+        # ),
+        
+        # Clean background
+        paper_bgcolor='#ffffff',
+        plot_bgcolor='#ffffff',
+        
+        # Responsive sizing
+        height=max(400, len(y_labels) * 35 + 150),  # Dynamic height based on data
+        width=1200,
+        
+        # Professional margins
+        margin=dict(t=40, b=40, l=80, r=40),
+        
+        # Typography
+        font=dict(size=18, color='#374151', family='Arial Black'),
+        
+        # X-axis styling
+        xaxis=dict(
+            title=dict(
+                text="<b>Number of Questions</b>",
+                font=dict(size=20, color='#1f2937')
+            ),
+            showgrid=True,
+            gridcolor='rgba(229, 231, 235, 0.8)',
+            gridwidth=1,
+            showline=True,
+            linecolor='#d1d5db',
+            linewidth=1,
+            tickfont=dict(size=16, color='#6b7280'),
+            tickformat=',',
+            zeroline=False
+        ),
+        
+        # Y-axis styling
+        yaxis=dict(
+            title=dict(
+                text="<b>Question Categories</b>",
+                font=dict(size=20, color='#1f2937')
+            ),
+            showgrid=False,
+            showline=True,
+            linecolor='#d1d5db',
+            linewidth=1,
+            tickfont=dict(size=18, color='#374151'),
+            categoryorder='trace'  # Maintain our custom order
+        ),
+        
+        # Remove legend since colors are self-explanatory
+        showlegend=False,
+        
+        # Add subtle shadow effect
+        # annotations=[
+        #     dict(
+        #         text=f"<i>Total Questions: {total:,}</i>",
+        #         xref="paper", yref="paper",
+        #         x=1, y=-0.12,
+        #         xanchor='right', yanchor='top',
+        #         font=dict(size=11, color='#6b7280'),
+        #         showarrow=False
+        #     )
+        # ]
+    )
+    
+    # Add category color legend as text annotations
+    legend_y = 1.02
+    legend_x_start = 0.1
+    
+    for i, (category, color) in enumerate(colors.items()):
+        fig.add_annotation(
+            text=f"<span style='color:{color}'>●</span> <b>{category.title()}</b>",
+            xref="paper", yref="paper",
+            x=legend_x_start + (i * 0.25), y=legend_y,
+            xanchor='left', yanchor='bottom',
+            font=dict(size=20, color='#374151'),
+            showarrow=False
+        )
+    
+    return fig
+
 def create_question_hierarchy_sunburst_debug(count_per_question_type):
     """Debug version to identify why Movement Direction isn't showing"""
     
@@ -379,20 +727,9 @@ def create_question_hierarchy_sunburst(count_per_question_type):
     values = []
     colors = []
     text_labels = []
+    cumulative_percents = []
     
     # CSS-based color schemes matching your badge styles
-    css_color_schemes = {
-        'info': '#2196f3',      # Blue - for information type questions
-        'attr': '#e91e63',      # Pink - for attribute questions  
-        'hog': '#9c27b0',       # Purple - for higher-order questions
-        'inst': '#4caf50',      # Green - for instruction questions
-        'cat': '#ff9800',       # Orange - for category questions
-        'mov': '#f44336',       # Red - for movement questions
-        'app': '#009688',       # Teal - for application questions
-        'rel': '#8bc34a'        # Light green - for relational questions
-    }
-    
-    # Map your hierarchy categories to CSS colors
     hierarchy_colors = {
         'motion': '#9c27b0',
         'attribute': '#4caf50', 
@@ -406,8 +743,7 @@ def create_question_hierarchy_sunburst(count_per_question_type):
     labels.append("All Questions")
     parents.append("")
     values.append(total_questions)
-    # colors.append('#37474f')  # Dark blue-gray for root
-    colors.append('#ffffff')  # Dark blue-gray for root
+    colors.append('#ffffff')
     text_labels.append(f"<b>Total<br>{total_questions:,}</b>")
     
     # Add hierarchy categories
@@ -415,39 +751,42 @@ def create_question_hierarchy_sunburst(count_per_question_type):
         total_cat = sum(question_types.values())
         percentage = (total_cat / max(total_questions, 1)) * 100
         
-        labels.append(hierarchy_cat.title())
+        hierarchy_cat_clean = hierarchy_cat.lower()
+        
+        labels.append(hierarchy_cat_clean.title())
         parents.append("All Questions")
         values.append(total_cat)
-        colors.append(hierarchy_colors[hierarchy_cat])
-        text_labels.append(f"<b>{hierarchy_cat.title()}<br>{total_cat}<br>({percentage:.1f}%)</b>")
+        colors.append(hierarchy_colors[hierarchy_cat_clean])
+        # Simpler text for middle ring
+        text_labels.append(f"<b>{hierarchy_cat_clean.title()}<br>{percentage:.1f}%</b>")
         
-        # Add individual question types with lighter shades
+        # Add individual question types
         for question_type, count in question_types.items():
-            # cat_percentage = (count / max(total_cat) * 100
             total_percentage = (count / max(total_questions, 1)) * 100
             
             labels.append(question_type)
-            parents.append(hierarchy_cat.title())
+            parents.append(hierarchy_cat_clean.title())
             values.append(count)
             
             # Create lighter shade of parent color
-            base_color = hierarchy_colors[hierarchy_cat]
-            # Convert hex to RGB and lighten
+            base_color = hierarchy_colors[hierarchy_cat_clean]
             hex_color = base_color.lstrip('#')
             rgb = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
-            # Lighten by adding to each RGB component
             lighter_rgb = tuple(min(255, c + 60) for c in rgb)
             lighter_color = f"#{lighter_rgb[0]:02x}{lighter_rgb[1]:02x}{lighter_rgb[2]:02x}"
-            
             colors.append(lighter_color)
-            question_type_nl = question_type.replace(' ', '<br>').replace('/', '/<br>')
             
-            text_labels.append(f"<b>{question_type_nl}<br>{count:,}<br>({total_percentage:.1f}%)</b>")
-
-            if hierarchy_cat.lower() == "binary":
-                print('question_type, count', question_type, count)
-                print(f"<b>{question_type_nl}<br>{count:,}<br>({total_percentage:.1f}%)</b>")
-        # print('text_labels', text_labels)
+            # text_labels.append(f"<b>{question_type}</b>")
+            # text_labels.append(f"<b>{total_percentage:.1f}%</b>")
+            text_labels.append(f"")
+            
+            
+            # # For small percentages, show minimal text or just percentage
+            # if total_percentage < 5:
+            #     text_labels.append(f"<b>{total_percentage:.1f}%</b>")
+            # else:
+            #     question_type_short = question_type.replace(' ', '<br>')
+            #     text_labels.append(f"<b>{question_type_short}</b>")
     
     fig = go.Figure(go.Sunburst(
         labels=labels,
@@ -461,11 +800,186 @@ def create_question_hierarchy_sunburst(count_per_question_type):
         ),
         text=text_labels,
         textinfo="text",
-        textfont=dict(size=16, color="black", family="Arial"),
+        textfont=dict(size=14, color="black", family="Arial bold"),
         hovertemplate='<b>%{label}</b><br>Count: %{value}<br>Percentage of Total: %{percentRoot:.1f}%<br>Percentage of Parent: %{percentParent:.1f}%<extra></extra>',
         maxdepth=4,
+        # Key change: use 'auto' for better text positioning
         insidetextorientation='tangential'
-        # insidetextorientation='auto'
+    ))
+    
+    fig.update_traces(sort=False, selector=dict(type='sunburst')) 
+    
+    # Add annotations for outer ring labels (positioned around perimeter)
+    annotations = []
+    import math
+    
+    # Calculate cumulative angles for proper positioning
+    cumulative_angle = 0
+    
+    print("text_labels", text_labels)
+    
+    for hierarchy_cat, question_types in count_per_question_type.items():
+        hierarchy_cat_clean = hierarchy_cat.lower()
+        total_cat = sum(question_types.values())
+        
+        for question_type, count in question_types.items():
+            total_percentage = (count / max(total_questions, 1)) * 100
+            
+            # Calculate the angle for this segment
+            segment_angle = (count / total_questions) * 360
+            middle_angle = cumulative_angle + (segment_angle / 2)
+            
+            # Only add perimeter labels for small segments
+
+            # Convert to radians and add π/2 offset to start from top
+            angle_rad = math.radians(middle_angle)  # -90 to start from top
+            
+            # Position text outside the chart
+            radius_text = 0.45  # Distance from center for text
+            radius_arrow = 0.4  # Distance from center for arrow point
+            
+            x_pos = 0.5 + radius_text * math.cos(angle_rad)
+            y_pos = 0.5 + radius_text * math.sin(angle_rad)
+            
+            # Arrow points to the segment
+            ax_pos = 0.5 + radius_arrow * math.cos(angle_rad)
+            ay_pos = 0.5 + radius_arrow * math.sin(angle_rad)
+            
+            
+            textangle = -1*middle_angle+90
+            
+            # if (textangle < -90) and (textangle > -390):
+            if -390 < textangle < -90:
+                textangle += 180
+            
+            # textangle = abs(textangle)
+            
+            annotations.append(dict(
+                x=x_pos, y=y_pos,
+                # text=f"<b>{textangle:.1f}</b>",
+                text=f"<b>{question_type}<br>{total_percentage:.1f}%</b>",
+                # text=f"<b>{question_type}</b><br>{total_percentage:.1f}%",
+                # text=f"{cumulative_angle:.2f}",
+                showarrow=True,
+                # textangle=textangle,
+                textangle=0,
+                arrowhead=0,
+                arrowsize=5,
+                arrowwidth=5,
+                arrowcolor="#000000",
+                ax=ax_pos,
+                ay=ay_pos,
+                xref="paper",   # Text position in paper coordinates (0-1)
+                yref="paper",   # Text position in paper coordinates (0-1)
+                axref="pixel",  # Arrow tail relative to text position in pixels
+                ayref="pixel",  # Arrow tail relative to text position in pixels
+                font=dict(size=20, color="#333333"),
+                bgcolor="rgba(255,255,255,0.9)",
+                bordercolor="#cccccc",
+                borderwidth=1,
+                borderpad=4,
+                xanchor="center"
+            ))
+            
+            cumulative_angle += segment_angle
+    
+    fig.update_layout(
+        font=dict(size=24, family='Arial'),
+        paper_bgcolor='rgba(255,255,255,1)',
+        plot_bgcolor='rgba(255,255,255,1)',
+        height=900,  # Increased to accommodate perimeter labels
+        width=900,
+        margin=dict(t=40, b=40, l=40, r=40),  # Increased margins
+        annotations=annotations
+    )
+    
+    return fig
+
+def create_question_hierarchy_sunburst_adaptive_text(count_per_question_type):
+    """Create sunburst with adaptive text based on segment size"""
+    
+    labels = []
+    parents = []
+    values = []
+    colors = []
+    text_labels = []
+    
+    hierarchy_colors = {
+        'motion': '#9c27b0',
+        'attribute': '#4caf50', 
+        'binary': '#2196f3'
+    }
+    
+    total_questions = sum(sum(counts.values()) for counts in count_per_question_type.values())
+    
+    # Add root
+    labels.append("All Questions")
+    parents.append("")
+    values.append(total_questions)
+    colors.append('#ffffff')
+    text_labels.append(f"<b>Total<br>{total_questions:,}</b>")
+    
+    # Add hierarchy categories
+    for hierarchy_cat, question_types in count_per_question_type.items():
+        total_cat = sum(question_types.values())
+        percentage = (total_cat / max(total_questions, 1)) * 100
+        
+        hierarchy_cat_clean = hierarchy_cat.lower()
+        
+        labels.append(hierarchy_cat_clean.title())
+        parents.append("All Questions")
+        values.append(total_cat)
+        colors.append(hierarchy_colors[hierarchy_cat_clean])
+        text_labels.append(f"<b>{hierarchy_cat_clean.title()}<br>{percentage:.0f}%</b>")
+        
+        # Add individual question types with adaptive text
+        for question_type, count in question_types.items():
+            total_percentage = (count / max(total_questions, 1)) * 100
+            
+            labels.append(question_type)
+            parents.append(hierarchy_cat_clean.title())
+            values.append(count)
+            
+            # Lighter shade
+            base_color = hierarchy_colors[hierarchy_cat_clean]
+            hex_color = base_color.lstrip('#')
+            rgb = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+            lighter_rgb = tuple(min(255, c + 60) for c in rgb)
+            lighter_color = f"#{lighter_rgb[0]:02x}{lighter_rgb[1]:02x}{lighter_rgb[2]:02x}"
+            colors.append(lighter_color)
+            
+            # Adaptive text based on percentage size
+            if total_percentage >= 10:
+                # Large segments: full text
+                question_type_formatted = question_type.replace('/', '/<br>')
+                text_labels.append(f"<b>{question_type_formatted}<br>{total_percentage:.1f}%</b>")
+            elif total_percentage >= 5:
+                # Medium segments: abbreviated text
+                abbreviated = question_type.replace(' Direction', '').replace(' Speed', '').replace('Movement', 'Move')
+                text_labels.append(f"<b>{abbreviated}<br>{total_percentage:.1f}%</b>")
+            elif total_percentage >= 2:
+                # Small segments: just percentage
+                text_labels.append(f"<b>{total_percentage:.1f}%</b>")
+            else:
+                # Very small segments: no text (rely on hover)
+                text_labels.append("")
+    
+    fig = go.Figure(go.Sunburst(
+        labels=labels,
+        parents=parents,
+        values=values,
+        branchvalues="total",
+        marker=dict(
+            colors=colors, 
+            line=dict(color="#ffffff", width=2),
+            colorscale=None
+        ),
+        text=text_labels,
+        textinfo="text",
+        textfont=dict(size=13, color="black", family="Arial"),
+        hovertemplate='<b>%{label}</b><br>Count: %{value:,}<br>Percentage: %{percentRoot:.2f}%<extra></extra>',
+        maxdepth=3,
+        insidetextorientation='auto'
     ))
     
     fig.update_layout(
@@ -473,18 +987,17 @@ def create_question_hierarchy_sunburst(count_per_question_type):
             'text': "VQA Dataset Question Hierarchy",
             'x': 0.5,
             'xanchor': 'center',
-            'font': {'size': 40, 'family': 'Arial Black', 'color': '#000000'}
+            'font': {'size': 28, 'family': 'Arial Black'}
         },
-        font=dict(size=16, family='Arial'),
-        paper_bgcolor='rgba(255,255,255,1)',
-        plot_bgcolor='rgba(255,255,255,1)',
+        font=dict(size=13, family='Arial'),
+        paper_bgcolor='white',
         height=800,
         width=800,
-        margin=dict(t=100, b=50, l=50, r=50)
+        margin=dict(t=70, b=50, l=50, r=50),
+        showlegend=False
     )
     
     return fig
-
 
 def create_question_answer_hierarchy_sunburst(n_samples_per_question_name_answer, count_per_question_type):
     """Create a beautiful sunburst chart showing question type hierarchy with CSS-based colors and percentages"""
@@ -580,7 +1093,8 @@ def create_question_answer_hierarchy_sunburst(n_samples_per_question_name_answer
         textfont=dict(size=16, color="black", family="Arial"),
         hovertemplate='<b>%{label}</b><br>Count: %{value}<br>Percentage of Total: %{percentRoot:.1f}%<br>Percentage of Parent: %{percentParent:.1f}%<extra></extra>',
         maxdepth=4,
-        insidetextorientation='tangential'
+        # insidetextorientation='radial'
+        # insidetextorientation='tangential'
         # insidetextorientation='auto'
     ))
     
@@ -596,7 +1110,7 @@ def create_question_answer_hierarchy_sunburst(n_samples_per_question_name_answer
         plot_bgcolor='rgba(255,255,255,1)',
         height=800,
         width=800,
-        margin=dict(t=100, b=50, l=50, r=50)
+        margin=dict(t=50, b=50, l=50, r=50)
     )
     
     return fig
@@ -702,9 +1216,46 @@ def calculate_metrics(ds: VQADataset):
         count_per_question_type=count_per_question_type
     )
     
+
+    
     # 1. Question Type Distribution (Hierarchical Sunburst)
     fig_sunburst = create_question_hierarchy_sunburst(count_per_question_type)
-    fig_sunburst.write_image(f'figures/question_hierarchy_sunburst_{ds.tag}.png')
+    # fig_sunburst.write_image(f'figures/question_hierarchy_sunburst_{ds.tag}.png')
+    # Save with high DPI for publication quality
+    fig_sunburst.write_image(
+        f'figures/question_hierarchy_sunburst_{ds.tag}.pdf',
+        scale=3,  # Higher scale for better quality
+        format="pdf",  # PDF is preferred for LaTeX
+    )
+    
+    # 1. Question Type Distribution (Hierarchical Sunburst)
+    fig_sunburst = create_question_hierarchy_sunburst_adaptive_text(count_per_question_type)
+    fig_sunburst.write_image(
+        f'figures/question_hierarchy_sunburst_adaptive_{ds.tag}.pdf',
+        scale=3,  # Higher scale for better quality
+        format="pdf",  # PDF is preferred for LaTeX
+    )
+    
+    fig = create_question_hierarchy_bars(count_per_question_type)
+    fig.write_image(
+        f'figures/create_question_hierarchy_bars_{ds.tag}.pdf',
+        scale=3,  # Higher scale for better quality
+        format="pdf",  # PDF is preferred for LaTeX
+    )
+    
+    fig = create_grouped_bars(count_per_question_type)
+    fig.write_image(
+        f'figures/create_grouped_bars_{ds.tag}.pdf',
+        scale=3,  # Higher scale for better quality
+        format="pdf",  # PDF is preferred for LaTeX
+    )
+    
+    fig = create_question_treemap(count_per_question_type)
+    fig.write_image(
+        f'figures/create_question_treemap_{ds.tag}.pdf',
+        scale=3,  # Higher scale for better quality
+        format="pdf",  # PDF is preferred for LaTeX
+    )
     
     # 1. Question Type Distribution (Hierarchical Sunburst)
     fig_sunburst = create_question_hierarchy_sunburst_debug(count_per_question_type)
@@ -731,39 +1282,49 @@ def main():
     
     save_prefix = "26_05_2025_export"
     
-    ds_dict = {
-        "validation": (["validation", save_prefix], VQADataset(tag=f"{save_prefix}_validation")),
-        "training": (["training", save_prefix], VQADataset(tag=f"{save_prefix}_training")),
-        "all": ([save_prefix], VQADataset(tag=f"{save_prefix}_all")),
-    }
+    ds =  VQADataset(tag=f"{save_prefix}_all")
     
-    save_path = generated_samples_path / f'{save_prefix}_alldata.json'
+    # ds_dict = {
+    #     "validation": (["validation", save_prefix], VQADataset(tag=f"{save_prefix}_validation")),
+    #     "training": (["training", save_prefix], VQADataset(tag=f"{save_prefix}_training")),
+    #     "all": ([save_prefix], VQADataset(tag=f"{save_prefix}_all")),
+    # }
     
-    for path in generated_samples_path.rglob(f'{save_prefix}*.json'):
-        if ("balance_stats" in path.name):
-            continue
-        
-        is_relevant = False
-        for keyword_list, _ in ds_dict.values():
-            is_relevant |= any(kwd in path.stem for kwd in keyword_list)
-                
-        if is_relevant:
+    # save_path = generated_samples_path / f'{save_prefix}_alldata.json'
+    
+    question_ids_seen = set()
+    
+    prompt_generators = ["ObjectDrawnBoxPromptGenerator", "ObjectBinaryPromptGenerator", "EgoRelativeObjectTrajectoryPromptGenerator"]
+    
+    for prompt_generator in prompt_generators:
+        for split in ["training", "validation"]:
+            path = generated_samples_path / f"{save_prefix}_{prompt_generator}_{split}.json"
+
             ds1 = VQADataset.load_dataset(str(path))
             
-            for ds_name, (keyword_list, ds) in ds_dict.items():
-                is_relevant = all(kwd in path.stem for kwd in keyword_list)
-                
-                if is_relevant:
-                    print(f'{path.stem} is relevant to {ds_name}')
-                    for sample in ds1.samples:
-                        ds.add_sample(sample.question, sample.answer)
-                        
-    for ds_name, (_, ds) in ds_dict.items():
-        print('ds_name', ds_name)
-        print('samples', len(ds.samples))
+            print("path", path.name)
+            
+            for sample in ds1.samples:
+                if sample.question.question_id not in question_ids_seen:
+                    ds.add_sample(sample.question, sample.answer)
+                    question_ids_seen.add(sample.question.question_id)
         
-        if len(ds.samples) > 0:
-            calculate_metrics(ds)
+        # is_relevant = False
+        # for keyword_list, _ in ds_dict.values():
+        #     is_relevant |= any(kwd in path.stem for kwd in keyword_list)
+                
+        # if is_relevant:
+        #     ds1 = VQADataset.load_dataset(str(path))
+            
+        #     for ds_name, (keyword_list, ds) in ds_dict.items():
+        #         is_relevant = all(kwd in path.stem for kwd in keyword_list)
+                
+        #         if is_relevant:
+        #             print(f'{path.stem} is relevant to {ds_name}')
+        #             for sample in ds1.samples:
+        #                 ds.add_sample(sample.question, sample.answer)
+          
+    calculate_metrics(ds)
     
     
 if __name__ == "__main__":

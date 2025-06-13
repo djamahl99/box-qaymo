@@ -4,11 +4,11 @@ import json
 import numpy as np
 import cv2
 
-from waymovqa.data.scene_info import SceneInfo
-from waymovqa.data.object_info import ObjectInfo
-from waymovqa.data.frame_info import FrameInfo
-from waymovqa.data.camera_info import CameraInfo
-from waymovqa.data.laser_info import LaserInfo
+from box_qaymo.data.scene_info import SceneInfo
+from box_qaymo.data.object_info import ObjectInfo
+from box_qaymo.data.frame_info import FrameInfo
+from box_qaymo.data.camera_info import CameraInfo
+from box_qaymo.data.laser_info import LaserInfo
 
 
 class WaymoDatasetLoader:

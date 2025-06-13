@@ -3,10 +3,10 @@ from typing import Dict, List, Any, Optional, Union, Tuple
 import json
 from enum import Enum
 
-from waymovqa.data.base import DataObject
-from waymovqa.data.object_info import ObjectInfo
-from waymovqa.data.camera_info import CameraInfo
-from waymovqa.data.laser_info import LaserInfo
+from box_qaymo.data.base import DataObject
+from box_qaymo.data.object_info import ObjectInfo
+from box_qaymo.data.camera_info import CameraInfo
+from box_qaymo.data.laser_info import LaserInfo
 
 
 class WeatherType(str, Enum):

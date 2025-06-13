@@ -13,13 +13,13 @@ import cv2
 
 from torchvision.ops import box_iou
 
-from waymovqa.questions.single_image_single_object import (
+from box_qaymo.questions.single_image_single_object import (
     SingleImageSingleObjectQuestion,
 )
 
 from .base import BaseMetric
-from waymovqa.answers.object_2d import Object2DAnswer
-from waymovqa.answers.multi_object_2d import MultiObject2DAnswer
+from box_qaymo.answers.object_2d import Object2DAnswer
+from box_qaymo.answers.multi_object_2d import MultiObject2DAnswer
 
 
 class COCOMetric(BaseMetric[Object2DAnswer]):

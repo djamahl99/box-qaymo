@@ -18,14 +18,14 @@ from groundingdino.models.GroundingDINO.groundingdino import GroundingDINO
 from groundingdino.util.inference import load_model, load_image, predict
 from groundingdino.util.utils import clean_state_dict
 
-from waymovqa.data.vqa_dataset import VQADataset
-from waymovqa.questions.single_image_single_object import (
+from box_qaymo.data.vqa_dataset import VQADataset
+from box_qaymo.questions.single_image_single_object import (
     SingleImageSingleObjectQuestion,
 )
-from waymovqa.answers.object_2d import Object2DAnswer
-from waymovqa.answers.multi_object_2d import MultiObject2DAnswer
-from waymovqa.metrics.coco import COCOEvaluator
-from waymovqa.waymo_loader import WaymoDatasetLoader
+from box_qaymo.answers.object_2d import Object2DAnswer
+from box_qaymo.answers.multi_object_2d import MultiObject2DAnswer
+from box_qaymo.metrics.coco import COCOEvaluator
+from box_qaymo.waymo_loader import WaymoDatasetLoader
 
 
 class GroundingDINODetector:

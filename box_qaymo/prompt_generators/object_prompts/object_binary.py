@@ -8,26 +8,26 @@ import cv2
 from collections import defaultdict
 from abc import ABC, abstractmethod
 
-from waymovqa.answers.multiple_choice import MultipleChoiceAnswer
-from waymovqa.questions.single_image_multi_choice import (
+from box_qaymo.answers.multiple_choice import MultipleChoiceAnswer
+from box_qaymo.questions.single_image_multi_choice import (
     SingleImageMultipleChoiceQuestion,
 )
-from waymovqa.questions.multi_image import MultipleImageQuestion
-from waymovqa.data.scene_info import SceneInfo
-from waymovqa.data.object_info import (
+from box_qaymo.questions.multi_image import MultipleImageQuestion
+from box_qaymo.data.scene_info import SceneInfo
+from box_qaymo.data.object_info import (
     OBJECT_SPEED_CATS,
     WAYMO_TYPE_MAPPING,
     DifficultyLevelType,
     HeadingType,
     ObjectInfo,
 )
-from waymovqa.data.frame_info import FrameInfo
-from waymovqa.data.camera_info import CameraInfo
-from waymovqa.data.laser_info import LaserInfo
-from waymovqa.prompt_generators.base import DISTANCE_BOUND, MIN_LIDAR_PTS, BasePromptGenerator
-from waymovqa.prompt_generators import register_prompt_generator
-from waymovqa.prompt_generators.templates import *
-from waymovqa.primitives import WAYMO_LABEL_TYPES
+from box_qaymo.data.frame_info import FrameInfo
+from box_qaymo.data.camera_info import CameraInfo
+from box_qaymo.data.laser_info import LaserInfo
+from box_qaymo.prompt_generators.base import DISTANCE_BOUND, MIN_LIDAR_PTS, BasePromptGenerator
+from box_qaymo.prompt_generators import register_prompt_generator
+from box_qaymo.prompt_generators.templates import *
+from box_qaymo.primitives import WAYMO_LABEL_TYPES
 
 from functools import partial
 
@@ -414,6 +414,149 @@ class ObjectBinaryPromptGenerator(BasePromptGenerator):
         return samples
 
     def visualise_sample(
+        self,
+        question_obj: SingleImageMultipleChoiceQuestion,
+        answer_obj: MultipleChoiceAnswer,
+        save_path,
+        frames,
+        pred_answer_obj: Optional[MultipleChoiceAnswer] = None,
+        extra_text="",
+        figsize=(12, 8),
+        text_fontsize=12,
+        title_fontsize=14,
+        dpi=150,
+    ):
+        import plotly.graph_objects as go
+        from PIL import Image
+        import numpy as np
+        import textwrap
+        from typing import Optional
+        """
+        Minimal Plotly visualization showing question, answer, and image.
+        
+        Args:
+            question_obj: Question object with image_path and question text
+            answer_obj: Answer object with answer text
+            save_path: Path to save the visualization
+            pred_answer_obj: Optional prediction answer object
+            width: Figure width in pixels
+            height: Figure height in pixels
+        """
+        
+        # Load image
+        try:
+            print("question_obj.image_path", question_obj.image_path)
+            img = Image.open(question_obj.image_path)
+            # img_array = np.array(img)
+            
+            width = img.width
+            height = img.height
+        except Exception as e:
+            # Create a placeholder if image can't be loaded
+            img_array = np.zeros((400, 600, 3), dtype=np.uint8)
+        
+        # Create figure
+        fig = go.Figure()
+        
+        # Add image
+        fig.add_layout_image(
+            dict(
+                source=img,
+                xref="x",
+                yref="y",
+                x=0,
+                y=height,
+                sizex=width,
+                sizey=height,
+                sizing="stretch",
+                layer="below"
+            )
+        )
+        
+        # Prepare answer text and color
+        answer_text = answer_obj.answer.lower()
+        answer_color = "white"
+        answer_symbol = ""
+        
+        if pred_answer_obj is not None:
+            if pred_answer_obj.get_answer_text().lower() == answer_obj.answer.lower():
+                answer_color = "green"
+                answer_symbol = " ✓"
+            else:
+                answer_color = "red" 
+                answer_symbol = " ✗"
+        
+        # Add question text at top
+        question_text = textwrap.fill(question_obj.question, width=60)
+        fig.add_annotation(
+            text=f"Q: {question_text}",
+            xref="paper", yref="paper",
+            x=0.02, y=0.98,
+            xanchor="left", yanchor="top",
+            showarrow=False,
+            font=dict(size=34, color="black"),
+            bgcolor="rgba(255,255,255,0.9)",
+            bordercolor="white",
+            borderwidth=1
+        )
+        
+        # Add ground truth answer at bottom
+        fig.add_annotation(
+            text=f"Answer: {answer_text.title()}",
+            xref="paper", yref="paper",
+            x=0.02, y=0.02,
+            xanchor="left", yanchor="bottom",
+            showarrow=False,
+            font=dict(size=34, color="black", family="Arial Black"),
+            bgcolor="rgba(255,255,255,0.8)",
+            bordercolor="white",
+            borderwidth=1
+        )
+        
+        # Add prediction if available
+        if pred_answer_obj is not None:
+            pred_text = f"Prediction: {pred_answer_obj.get_answer_text().upper()}{answer_symbol}"
+            fig.add_annotation(
+                text=pred_text,
+                xref="paper", yref="paper",
+                x=0.02, y=0.10,
+                xanchor="left", yanchor="bottom",
+                showarrow=False,
+                font=dict(size=34, color="white", family="Arial Black"),
+                bgcolor=f"rgba({'0,128,0' if answer_color == 'green' else '255,0,0'},0.8)",
+                bordercolor=answer_color,
+                borderwidth=1
+            )
+        
+        # Update layout for minimal appearance
+        fig.update_layout(
+            width=width,
+            height=height,
+            margin=dict(l=0, r=0, t=0, b=0),
+            xaxis=dict(
+                showgrid=False,
+                showticklabels=False,
+                zeroline=False,
+                range=[0, width]
+            ),
+            yaxis=dict(
+                showgrid=False,
+                showticklabels=False,
+                zeroline=False,
+                range=[0, height],
+                scaleanchor="x",
+                scaleratio=1
+            ),
+            plot_bgcolor="white",
+            paper_bgcolor="white"
+        )
+        
+        # Save the figure
+        fig.write_image(save_path)
+        
+        return fig
+
+    def visualise_sample_(
         self,
         question_obj: SingleImageMultipleChoiceQuestion,
         answer_obj: MultipleChoiceAnswer,

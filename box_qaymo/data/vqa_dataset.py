@@ -1,9 +1,9 @@
 from typing import List, Dict, Optional, Tuple, Union, Type
 
-from waymovqa.answers.base import BaseAnswer
-from waymovqa.answers import answer_from_dict, answer_from_json
-from waymovqa.questions import question_from_dict, question_from_json
-from waymovqa.questions.base import BaseQuestion
+from box_qaymo.answers.base import BaseAnswer
+from box_qaymo.answers import answer_from_dict, answer_from_json
+from box_qaymo.questions import question_from_dict, question_from_json
+from box_qaymo.questions.base import BaseQuestion
 
 import pprint
 

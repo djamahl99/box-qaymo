@@ -13,11 +13,11 @@ from scipy.spatial.distance import euclidean
 from scipy.spatial.distance import cdist
 
 
-from waymovqa.data import *
-from waymovqa.data.camera_info import CameraInfo
-from waymovqa.data.scene_info import SceneInfo
-from waymovqa.data.frame_info import FrameInfo, TimeOfDayType, WeatherType, LocationType
-from waymovqa.data.object_info import (
+from box_qaymo.data import *
+from box_qaymo.data.camera_info import CameraInfo
+from box_qaymo.data.scene_info import SceneInfo
+from box_qaymo.data.frame_info import FrameInfo, TimeOfDayType, WeatherType, LocationType
+from box_qaymo.data.object_info import (
     OBJECT_SPEED_CATS,
     OBJECT_SPEED_THRESH,
     WAYMO_TYPE_MAPPING,
@@ -25,22 +25,22 @@ from waymovqa.data.object_info import (
     MovementType,
     ObjectInfo,
 )
-from waymovqa.prompt_generators import BasePromptGenerator, register_prompt_generator
+from box_qaymo.prompt_generators import BasePromptGenerator, register_prompt_generator
 
-from waymovqa.questions.multi_frame_multi_choice import (
+from box_qaymo.questions.multi_frame_multi_choice import (
     MultipleFrameMultipleChoiceQuestion,
 )
-from waymovqa.questions.multi_image_multi_choice import (
+from box_qaymo.questions.multi_image_multi_choice import (
     MultipleImageMultipleChoiceQuestion,
 )
-from waymovqa.questions.single_image_multi_choice import (
+from box_qaymo.questions.single_image_multi_choice import (
     SingleImageMultipleChoiceQuestion,
 )
-from waymovqa.questions.base import BaseQuestion
-from waymovqa.answers.multiple_choice import MultipleChoiceAnswer
-from waymovqa.metrics.multiple_choice import MultipleChoiceMetric
-from waymovqa.metrics.base import BaseMetric
-from waymovqa.primitives import CHOICES_OPTIONS
+from box_qaymo.questions.base import BaseQuestion
+from box_qaymo.answers.multiple_choice import MultipleChoiceAnswer
+from box_qaymo.metrics.multiple_choice import MultipleChoiceMetric
+from box_qaymo.metrics.base import BaseMetric
+from box_qaymo.primitives import CHOICES_OPTIONS
 
 
 # Default config values that can be overridden
@@ -2971,7 +2971,7 @@ class EgoRelativeObjectTrajectoryPromptGenerator(BasePromptGenerator):
                 answer_description=answer_description,
             )
         else:
-            from waymovqa.prompt_generators.object_prompts.object_drawn_box_prompt import (
+            from box_qaymo.prompt_generators.object_prompts.object_drawn_box_prompt import (
                 ObjectDrawnBoxPromptGenerator,
             )
 
@@ -3302,7 +3302,7 @@ class EgoRelativeObjectTrajectoryMultiFramePromptGenerator(
                 answer_description=answer_description,
             )
         else:
-            from waymovqa.prompt_generators.object_prompts.object_drawn_box_prompt import (
+            from box_qaymo.prompt_generators.object_prompts.object_drawn_box_prompt import (
                 ObjectDrawnBoxPromptGenerator,
             )
 

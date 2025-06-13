@@ -4,23 +4,23 @@ from typing import Dict, List, Any, Optional, Union, Set, Tuple
 from datetime import datetime
 import pytz
 
-from waymovqa.data import *
-from waymovqa.data.scene_info import SceneInfo
-from waymovqa.data.frame_info import FrameInfo, TimeOfDayType, WeatherType, LocationType
-from waymovqa.data.object_info import ObjectInfo
-from waymovqa.prompt_generators import BasePromptGenerator, register_prompt_generator
+from box_qaymo.data import *
+from box_qaymo.data.scene_info import SceneInfo
+from box_qaymo.data.frame_info import FrameInfo, TimeOfDayType, WeatherType, LocationType
+from box_qaymo.data.object_info import ObjectInfo
+from box_qaymo.prompt_generators import BasePromptGenerator, register_prompt_generator
 
-from waymovqa.questions.multi_image_multi_choice import (
+from box_qaymo.questions.multi_image_multi_choice import (
     MultipleImageMultipleChoiceQuestion,
 )
-from waymovqa.questions.single_image import SingleImageQuestion
-from waymovqa.questions.single_image_multi_choice import (
+from box_qaymo.questions.single_image import SingleImageQuestion
+from box_qaymo.questions.single_image_multi_choice import (
     SingleImageMultipleChoiceQuestion,
 )
-from waymovqa.questions.base import BaseQuestion
-from waymovqa.answers.multiple_choice import MultipleChoiceAnswer
-from waymovqa.metrics.multiple_choice import MultipleChoiceMetric
-from waymovqa.metrics.base import BaseMetric
+from box_qaymo.questions.base import BaseQuestion
+from box_qaymo.answers.multiple_choice import MultipleChoiceAnswer
+from box_qaymo.metrics.multiple_choice import MultipleChoiceMetric
+from box_qaymo.metrics.base import BaseMetric
 
 
 class BaseSceneChoicePromptGenerator(BasePromptGenerator):

@@ -1,8 +1,8 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Union, Type, TypeVar, Generic, Optional, Tuple
-from waymovqa.answers.base import BaseAnswer
-from waymovqa.data.vqa_dataset import VQADataset
-from waymovqa.questions.base import BaseQuestion
+from box_qaymo.answers.base import BaseAnswer
+from box_qaymo.data.vqa_dataset import VQADataset
+from box_qaymo.questions.base import BaseQuestion
 
 # Define type variable for answer types
 T = TypeVar("T", bound=BaseAnswer)

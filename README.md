@@ -1,7 +1,7 @@
-# WaymoVQA Code Structure
+# Box-QAymo Code Structure
 
 ## Overview
-WaymoVQA is a comprehensive framework for generating, processing, and evaluating visual question answering (VQA) tasks on the Waymo dataset. The codebase facilitates creating diverse question types about scenes, evaluating model responses using various metrics, and supporting different answer formats.
+Box-QAymo is a comprehensive framework for generating, processing, and evaluating visual question answering (VQA) tasks on the Waymo dataset. The codebase facilitates creating diverse question types about scenes, evaluating model responses using various metrics, and supporting different answer formats.
 
 ## Setup
 
@@ -10,7 +10,7 @@ WaymoVQA is a comprehensive framework for generating, processing, and evaluating
 2. Setup waymo_env following ```requirements_extraction.txt```, this environment will be used for extracting Waymo only.
 3. Extract Waymo tfrecord data using ```waymo_extract.py```
     - we recommend just having an environment just for this that has an environment with ```waymo-open-dataset-tf-2-12-0==1.6.4``` to handle 
-4. Download ```objectid_to_label.json``` and ```objectid_to_color.json``` and place in ```./data```
+4. Download ```objectid_to_label.json``` and ```objectid_to_color.json``` and ```meta.json``` from https://drive.google.com/drive/folders/1hgEu0n3TdDilA0nc01DHFo9I1kNfRNf2?usp=sharing and place in ```./data```
 
 ### Waymo Dataset Preprocessing 
 
@@ -41,27 +41,13 @@ point_clouds
 ### VQA Dataset Generation
 
 ```
-python vqa_generator.py --dataset_path /media/local-data/uqdetche/waymo_vqa --generators Grounding2DPromptGenerator --method object --total_samples 20 --model 
+python vqa_generator.py --dataset_path /media/local-data/uqdetche/waymo_vqa
 ```
-
-### Models to Evaluate
-
-1. SENNA - zeroshot and finetune (for one task)
-2. Language Prompt for Autonomous Driving https://github.com/wudongming97/Prompt4Driving
-3. https://github.com/ThierryDeruyttere/vilbert-Talk2car
-
-VLMs?
-1. OWLViT
-2. Grounding DINO
-3. LLAVA
-4. QwenVL
-
- - we can evaluate these as 2d grounding models
 
 
 ## Core Components
 
-### `waymovqa.data`
+### `Box-QAymo.data`
 Data representation and loading utilities for Waymo dataset.
 
 - **`DataObject`**: Base class for all data objects
@@ -73,7 +59,7 @@ Data representation and loading utilities for Waymo dataset.
 - **`VQADataset`**: Dataset container for VQA tasks
 - **`WaymoDatasetLoader`**: Handles extraction and loading of Waymo data
 
-### `waymovqa.metrics`
+### `Box-QAymo.metrics`
 Evaluation metrics for different answer types.
 
 - **`BaseMetric<T>`**: Generic base class for all metrics
@@ -85,13 +71,13 @@ Evaluation metrics for different answer types.
 - **`BERTScoreMetric`**: BERT-based semantic similarity metrics
 - **`SimpleTextSimilarityMetric`**: Lightweight text similarity without dependencies
 
-### `waymovqa.models`
+### `Box-QAymo.models`
 Model interfaces and implementations.
 
 - **`BaseModel`**: Abstract interface for all VQA models
 - **`Grounding2DModel`**: Model for 2D object localization tasks
 
-### `waymovqa.prompts`
+### `Box-QAymo.prompts`
 Prompt generators for different question types.
 
 - **`BasePromptGenerator`**: Abstract base for all prompt generators
@@ -103,7 +89,7 @@ Prompt generators for different question types.
   - **`ObjectLocationPromptGenerator`**: Prompts about object positions
   - **`ObjectRelationPromptGenerator`**: Prompts about relationships between objects
 
-### `waymovqa.questions`
+### `Box-QAymo.questions`
 Question types and representations.
 
 - **`QuestionType`**: Enumeration of supported question types
@@ -112,7 +98,7 @@ Question types and representations.
 - **`MultipleImageQuestion`**: Questions involving multiple images
 - **`MultiChoiceSingleImageQuestion`**: Multiple-choice questions about a single image
 
-### `waymovqa.answers`
+### `Box-QAymo.answers`
 Answer representations for different question types.
 
 - **`AnswerType`**: Enumeration of supported answer types

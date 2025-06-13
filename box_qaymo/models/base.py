@@ -1,8 +1,8 @@
 from abc import ABC, abstractmethod
 from typing import Type
-from waymovqa.questions.base import BaseQuestion
-from waymovqa.answers.base import BaseAnswer
-from waymovqa.metrics.base import BaseMetric
+from box_qaymo.questions.base import BaseQuestion
+from box_qaymo.answers.base import BaseAnswer
+from box_qaymo.metrics.base import BaseMetric
 
 
 class BaseModel(ABC):
