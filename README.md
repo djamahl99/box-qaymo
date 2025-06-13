@@ -133,11 +133,11 @@ Box-QAymo enables research in:
 If you use Box-QAymo in your research, please cite:
 
 ```bibtex
-@article{box_qaymo_2024,
-  title={Box-QAymo: A Box-Referring VQA Dataset for Spatial and Temporal Reasoning in Autonomous Driving},
-  author={Your Name and Co-authors},
-  journal={arXiv preprint arXiv:XXXX.XXXXX},
-  year={2024}
+@article{box_qaymo_2025,
+  title={Box-QAymo: Box-Referring VQA Dataset for Autonomous Driving},
+  author={Etchegaray, Djamahl, Fu, Yuxia, Huang, Zi and Luo, Yadan},
+  journal={arXiv preprint},
+  year={2025}
 }
 ```
 
