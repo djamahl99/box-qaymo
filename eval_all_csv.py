@@ -11,6 +11,10 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 import plotly.io as pio
 
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+import seaborn as sns
+
 pio.kaleido.scope.mathjax = None
 
 from failure_analysis import run_comprehensive_failure_analysis
@@ -991,7 +995,7 @@ def save_latex_tables_with_weighted_averages(df: pd.DataFrame, save_path: str):
     print(f"LaTeX tables saved to: {save_path}")
 
 def save_bar_chart(df: pd.DataFrame, save_path: str):
-    """Generate professional bar charts suitable for academic papers (CVPR/ICCV style)"""
+    """Generate professional grouped bar charts suitable for academic papers (CVPR/ICCV style) using matplotlib"""
 
     if "Category" not in df.keys():
         return
@@ -1013,26 +1017,35 @@ def save_bar_chart(df: pd.DataFrame, save_path: str):
     df = df[df["Category"] != "overall"].copy()
     df["Category"] = df["Category"].str.title()
 
-    # Professional color palette (more muted, academic-friendly)
-    # Using colorbrewer colors that work well in print
-    academic_colors = [
-        "#1f77b4",  # Blue
-        "#ff7f0e",  # Orange
-        "#2ca02c",  # Green
-        "#d62728",  # Red
-        "#9467bd",  # Purple
-        "#8c564b",  # Brown
-        "#e377c2",  # Pink
-        "#7f7f7f",  # Gray
-        "#bcbd22",  # Olive
-        "#17becf",  # Cyan
-    ]
+    # Professional muted color palette (academic-friendly)
+    # Using muted colorbrewer colors that work well in print
+    # academic_colors = [
+    #     "#5b9bd5",  # Muted blue
+    #     "#f79646",  # Muted orange
+    #     "#70ad47",  # Muted green
+    #     "#c55a5a",  # Muted red
+    #     "#9f9f9f",  # Muted gray
+    #     "#c27ba0",  # Muted purple
+    #     "#a17c5a",  # Muted brown
+    #     "#87ceeb",  # Light sky blue
+    #     "#dda0dd",  # Plum
+    #     "#98d8c8",  # Mint
+    # ]
+
+    plt.style.use('seaborn-v0_8-whitegrid')  # Academic style
 
     models = df["Model"].unique()
+
+    academic_colors = sns.color_palette("muted", len(models))
+    academic_colors = [(r*0.5 + 0.5, g*0.5 + 0.5, b*0.5 + 0.5) 
+                            for r, g, b in academic_colors]
+
     model_colors = {
         model: academic_colors[i % len(academic_colors)]
         for i, model in enumerate(models)
     }
+
+
 
     # Define custom category order
     category_order = ["Binary", "Attribute", "Motion"]
@@ -1045,110 +1058,115 @@ def save_bar_chart(df: pd.DataFrame, save_path: str):
         df["Category"], categories=category_order, ordered=True
     )
 
-    # Create the bar chart
-    fig = go.Figure()
-
-    for model in models:
+    # Create the figure with academic proportions
+    fig, ax = plt.subplots(figsize=(8, 5))  # Good for 2-column papers
+    
+    # Prepare data for grouped bar chart
+    category_labels = category_order
+    x_positions = np.arange(len(category_labels))
+    bar_width = 0.8 / len(models)  # Width of bars adjusted for number of models
+    
+    # Plot bars for each model
+    for i, model in enumerate(models):
         model_df = df[df["Model"] == model].copy()
-
+        
         # Group by category and get mean F1 score (in case of multiple entries per category)
         category_f1 = model_df.groupby("Category", observed=True)["F1"].mean()
+        
+        # Reindex to ensure all categories are present (fill missing with 0)
+        category_f1 = category_f1.reindex(category_order, fill_value=0)
+        
+        # Calculate x positions for this model's bars
+        x_pos = x_positions + (i - len(models)/2 + 0.5) * bar_width
+        
+        # Create bars
+        bars = ax.bar(x_pos, category_f1.values, 
+                     width=bar_width, 
+                     label=model,
+                     color=model_colors[model],
+                     edgecolor='black',
+                     linewidth=0.5,
+                     alpha=1.0)
 
-        # Sort by the categorical order
-        category_f1 = category_f1.sort_index()
+                #          bars = ax.barh(y_positions, percentages, color=bar_colors, 
+                #    edgecolor='black', linewidth=0.8, alpha=1.0)
+    
+    # Set x-axis labels and positions
+    ax.set_xticks(x_positions)
+    ax.set_xticklabels(category_labels, fontsize=12, fontfamily='Arial')
+    ax.set_xlabel("", fontsize=14, fontfamily='Arial')  # Empty as in original
+    
+    # Set y-axis
+    ax.set_ylabel("F1 Score (%)", fontsize=14, fontfamily='Arial')
+    
+    # Academic styling matching the original
+    # ax.spines['top'].set_visible(True)
+    # ax.spines['right'].set_visible(True)
+    ax.spines['bottom'].set_visible(True)
+    # ax.spines['left'].set_visible(True)
+    
+    # Set spine colors and width
+    for spine in ax.spines.values():
+        spine.set_color('black')
+        spine.set_linewidth(1)
+    
+    # Grid styling (light gray, only for y-axis like in original)
+    ax.grid(True, axis='y', color='lightgray', linestyle='-', linewidth=0.5, alpha=0.7)
+    ax.set_axisbelow(True)  # Grid behind bars
+    
+    # Remove x-axis grid
+    ax.grid(False, axis='x')
+    
+    # Set tick parameters for academic style
+    ax.tick_params(axis='both', which='major', labelsize=12, 
+                   width=1, length=5, direction='out', color='black')
+    ax.tick_params(axis='x', which='major', bottom=True, top=False)
+    ax.tick_params(axis='y', which='major', left=True, right=False)
+    
+    # Add zero line
+    ax.axhline(y=0, color='black', linewidth=1, zorder=0)
+    
+    legend = ax.legend(loc='upper right',
+                      ncol=min(len(models), 3),  # Max 4 columns to prevent overcrowding
+                      frameon=True,  # Transparent background like original
+                      fancybox=False,
+                      shadow=False,
+                      title=None,
+                      fontsize=12)
 
-        fig.add_trace(
-            go.Bar(
-                x=[
-                    str(cat) for cat in category_f1.index
-                ],  # Convert to string for Plotly
-                y=category_f1.values,
-                name=model,
-                marker_color=model_colors[model],
-                marker_line=dict(color="white", width=0.5),  # Subtle white borders
-                opacity=0.85,
-            )
-        )
-
-    # Professional academic styling
-    fig.update_layout(
-        # Remove title - will be added in LaTeX
-        title=None,
-        # Axis styling
-        xaxis=dict(
-            title="",
-            title_font=dict(size=14, family="Arial, sans-serif"),
-            tickfont=dict(size=12, family="Arial, sans-serif"),
-            linecolor="black",
-            linewidth=1,
-            mirror=True,
-            ticks="outside",
-            tickwidth=1,
-            ticklen=5,
-        ),
-        yaxis=dict(
-            title="F1 Score (%)",
-            title_font=dict(size=14, family="Arial, sans-serif"),
-            tickfont=dict(size=12, family="Arial, sans-serif"),
-            linecolor="black",
-            linewidth=1,
-            mirror=True,
-            ticks="outside",
-            tickwidth=1,
-            ticklen=5,
-            gridcolor="lightgray",
-            gridwidth=0.5,
-            zeroline=True,
-            zerolinecolor="black",
-            zerolinewidth=1,
-        ),
-        # Bar grouping
-        barmode="group",
-        bargap=0.15,  # Gap between groups
-        bargroupgap=0.1,  # Gap between bars in group
-        # Legend styling
-        legend=dict(
-            orientation="h",
-            yanchor="top",
-            y=-0.15,  # Tighter positioning
-            xanchor="center",
-            x=0.5,
-            font=dict(size=11, family="Arial, sans-serif"),
-            bgcolor="rgba(0,0,0,0)",  # Transparent background
-            bordercolor="black",
-            borderwidth=0,
-        ),
-        # Overall layout
-        plot_bgcolor="white",
-        paper_bgcolor="white",
-        # Tighter margins for academic papers
-        margin=dict(
-            l=60,  # Left margin
-            r=20,  # Right margin
-            t=20,  # Top margin (small since no title)
-            b=80,  # Bottom margin (space for legend)
-        ),
-        # Professional dimensions (good for 2-column papers)
-        height=300,  # Shorter height
-        width=500,  # Narrower width
-        # Font settings
-        font=dict(family="Arial, sans-serif", size=12, color="black"),
+    # Set font family for legend
+    for text in legend.get_texts():
+        text.set_fontfamily('Arial')
+    
+    # Set background colors
+    fig.patch.set_facecolor('white')
+    ax.set_facecolor('white')
+    
+    # Adjust layout with tighter margins for academic papers
+    plt.tight_layout()
+    plt.subplots_adjust(
+        left=0.12,    # Left margin (60/500 from original)
+        right=0.96,   # Right margin (20/500 from original) 
+        top=0.93,     # Top margin (20/300 from original)
+        bottom=0.27   # Bottom margin for legend (80/300 from original)
     )
-
-    # Add subtle grid
-    fig.update_xaxes(showgrid=False)
-    fig.update_yaxes(showgrid=True, gridcolor="lightgray", gridwidth=0.5)
-
+    
     # Save with high DPI for publication quality
     save_path = Path(save_path).with_suffix(".pdf")
-    fig.write_image(
-        save_path,
-        width=500,
-        height=300,
-        scale=3,  # Higher scale for better quality
-        format="pdf",  # PDF is preferred for LaTeX
-    )
+    
+    plt.savefig(save_path, 
+                dpi=300,  # High DPI like original (scale=3)
+                bbox_inches='tight',
+                facecolor='white', 
+                edgecolor='none',
+                format='pdf')  # PDF preferred for LaTeX
+    
     print(f"Professional bar chart saved to: {save_path}")
+    
+    # Close the figure to free memory
+    plt.close(fig)
+    
+    return fig
 
 
 # Alternative version with even more minimal styling
@@ -2059,8 +2077,11 @@ def main():
         # "llava-v1.5-7b": "LLaVA",
         # "llava-v1.5-7b_nobbox": "LLaVA - No Drawn Box",
         "llava-v1.5-7b_raw_wchoices": "LLaVA",
-        "llava-v1.5-7b_raw_wchoices_nodrawnbbox": "LLaVA - No Drawn Box",
-        "qwen-vlnobbox_wchoices": "Qwen-VL - No Drawn Box",
+
+        # for ablation
+        # "llava-v1.5-7b_raw_wchoices_nodrawnbbox": "LLaVA - No Drawn Box",
+        # "qwen-vlnobbox_wchoices": "Qwen-VL - No Drawn Box",
+        
         "qwen-vlwchoices": "Qwen-VL",
         "llava-v1.5-7b-lorafinetuned_wchoices": "LLaVA\\textsuperscript{\\textdagger}",
         # "Senna_results_0527": "SENNA - No Choices",
@@ -2118,12 +2139,15 @@ def main():
         results_df = create_results_dataframe(all_model_results, category_datasets)
 
         print(f"\nStep 4: Exporting results...")
-        save_path = f"./figures/tables/{save_prefix}_all_models_tables.tex"
-        weighted_save_path = f"./figures/tables/{save_prefix}_all_models_tables_weighted.tex"
-        radar_save_path = f"./figures/tables/radar_{save_prefix}.png"
-        radar_save_path_single = f"./figures/tables/radar_single_{save_prefix}.png"
-        bar_save_path = f"./figures/tables/bar_{save_prefix}.png"
-        bar_minimal_save_path = f"./figures/tables/bar_minimal_{save_prefix}.png"
+
+        save_prefix_new = save_prefix + "_wacv"
+
+        save_path = f"./figures/tables/{save_prefix_new}_all_models_tables.tex"
+        weighted_save_path = f"./figures/tables/{save_prefix_new}_all_models_tables_weighted.tex"
+        radar_save_path = f"./figures/tables/radar_{save_prefix_new}.png"
+        radar_save_path_single = f"./figures/tables/radar_single_{save_prefix_new}.png"
+        bar_save_path = f"./figures/tables/bar_{save_prefix_new}.png"
+        bar_minimal_save_path = f"./figures/tables/bar_minimal_{save_prefix_new}.png"
         export_results_to_csv(results_df, save_path)
         save_latex_tables(results_df, save_path)
         save_latex_tables_with_weighted_averages(results_df, weighted_save_path)

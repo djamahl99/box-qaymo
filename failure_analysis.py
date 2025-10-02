@@ -1,22 +1,22 @@
-from pathlib import Path
-import plotly.graph_objects as go
-import plotly.express as px
-from plotly.subplots import make_subplots
-import numpy as np
-from typing import Dict, List, Optional, Any, Tuple
 import importlib
-import os
-from collections import defaultdict, Counter
-import pandas as pd
 import json
+import os
+import string
+from collections import Counter, defaultdict
+from pathlib import Path
 from pprint import pprint
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 from box_qaymo.data.vqa_dataset import VQADataset, VQASample
 from box_qaymo.metrics.multiple_choice import MultipleChoiceMetric
 from box_qaymo.questions.base import BaseQuestion
 from box_qaymo.waymo_loader import WaymoDatasetLoader
-import string
-
 
 MODEL_SUFFIX_MAP = {
     # "llava-v1.5-7b": "LLaVA",
@@ -59,10 +59,12 @@ QUESTION_TYPE_MAPPINGS = {
     
 }
 
+import textwrap
+from typing import Dict, Optional
+
 import plotly.graph_objects as go
 from PIL import Image
-import textwrap
-from typing import Optional, Dict
+
 
 def visualise_sample_plotly(
     question_obj,
@@ -319,9 +321,15 @@ class FailureAnalyzer:
             for idx, (question, gt_answer, pred_answer) in enumerate(zip(questions_list, gt_answers, pred_answers)):
 
                 # if question.question_name != "_prompt_moving_towards_ego" or "pedestrian" in question.question:
-                if question.question_name not in ["_prompt_vehicle_future_path", "_prompt_moving_towards_ego"] or "pedestrian" in question.question:
-                    continue
+                # if question.question_name not in ["_prompt_vehicle_future_path", "_prompt_moving_towards_ego"] or "pedestrian" in question.question:
+                #     continue
+
+                # if question.question_name in ["_prompt_vehicle_future_path", "_prompt_moving_towards_ego"]:
+                #     continue
                 
+                if question.question_name not in ["_label_prompt", "_color_prompt"]:
+                    continue
+
                 result = metric.evaluate(pred_answer, gt_answer, question)
                 
                 if not result["correct"] and result["valid"]:
@@ -715,7 +723,7 @@ def create_confusion_matrix_plotly(
     question_name: str,
     title: Optional[str] = None,
     show_percentages: bool = True,
-    normalize: Optional[str] = None,
+    normalize: Optional[str] = "true",
     colorscale: str = "Blues",
     width: int = 600,
     height: int = 500,
@@ -736,19 +744,25 @@ def create_confusion_matrix_plotly(
     # Store original matrix for hover text
     original_matrix = matrix.copy()
 
+
+    zmin = 0
+    zmax = original_matrix.max()
     # Normalize if requested
     normalized_matrix = matrix.copy()
     if normalize == "true":
         row_sums = matrix.sum(axis=1, keepdims=True)
         row_sums[row_sums == 0] = 1
         normalized_matrix = matrix / row_sums
+        zmax = 1.0
     elif normalize == "pred":
         col_sums = matrix.sum(axis=0, keepdims=True)
         col_sums[col_sums == 0] = 1
         normalized_matrix = matrix / col_sums
+        zmax = 1.0
     elif normalize == "all":
         total = matrix.sum()
         normalized_matrix = matrix / total if total > 0 else matrix
+        zmax = 1.0
 
     # Create hover text with enhanced information
     hover_text = []
@@ -796,7 +810,7 @@ def create_confusion_matrix_plotly(
                 
                 if n_classes <= 8:
                     if normalize and show_percentages:
-                        percentage = normalized_matrix[i, j] * 100
+                        percentage = normalized_matrix[i, j]
                         text = f"{count}<br>({percentage:.1f}%)"
                     else:
                         text = str(count)
@@ -827,8 +841,10 @@ def create_confusion_matrix_plotly(
             customdata=hover_text,
             showscale=True,
             colorbar=dict(
-                title="Normalized Value" if normalize else "Count",
+                title="% of True" if normalize else "Count",
             ),
+            zmin=zmin,
+            zmax=zmax
         )
     )
 

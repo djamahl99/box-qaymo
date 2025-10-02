@@ -22,6 +22,9 @@ from collections import defaultdict
 import numpy as np
 import plotly.io as pio
 
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+
 pio.kaleido.scope.mathjax = None
 
 # Question type mappings based on your templates
@@ -415,16 +418,159 @@ def save_bar_chart(df: pd.DataFrame, save_path: str):
     )
     print(f"Professional bar chart saved to: {save_path}")
 
+def create_question_hierarchy_bars_mpl(count_per_question_type, save_path):
+    """Create a professional horizontal bar chart matching academic paper style using matplotlib"""
+    
+    # Academic color palette matching the PDF (muted colors)
+    colors = {
+        'binary': '#d4e6f1',      # Light blue (like in PDF)
+        'attribute': '#d5f4e6',   # Light green (like in PDF) 
+        'motion': '#e8d5f4',      # Light purple (like in PDF)
+    }
+
+    # Calculate total for percentages
+    total = sum(sum(counts.values()) for counts in count_per_question_type.values())
+    
+    # Prepare data with better organization
+    y_labels = []
+    percentages = []
+    bar_colors = []
+
+    plt.rcParams['font.weight'] = 'bold'
+    
+    # Sort hierarchy categories by total count (largest first) - or maintain specific order like PDF
+    # For academic papers, you might want a specific logical order instead of size-based
+    desired_order = ['binary', 'attribute', 'motion']  # Adjust as needed
+    
+    for hierarchy in desired_order:
+        if hierarchy in count_per_question_type:
+            questions = count_per_question_type[hierarchy]
+            # Sort questions within each hierarchy by count (largest first)
+            sorted_questions = sorted(questions.items(), key=lambda x: x[1], reverse=True)
+            
+            for q_type, count in sorted_questions:
+                # Clean label formatting matching PDF style
+                label = f"{hierarchy.title()}: {q_type.replace('_', ' ').title()}"
+                y_labels.append(label)
+                percentage = (count / total) * 100
+                percentages.append(percentage)
+                bar_colors.append(colors[hierarchy.lower()])
+    
+    # Reverse the order for proper top-to-bottom display (like PDF)
+    y_labels = y_labels[::-1]
+    percentages = percentages[::-1]
+    bar_colors = bar_colors[::-1]
+    
+    # Create figure and axis with academic proportions
+    # fig, ax = plt.subplots(figsize=(10, max(6, len(y_labels) * 0.4)))
+    fig, ax = plt.subplots(figsize=(8, 5))
+    
+    # Create horizontal bar chart
+    y_positions = np.arange(len(y_labels))
+    bars = ax.barh(y_positions, percentages, color=bar_colors, 
+                   edgecolor='black', linewidth=0.8, alpha=1.0)
+    
+    # Add percentage labels on the bars (like in PDF)
+    for i, (bar, percentage) in enumerate(zip(bars, percentages)):
+        width = bar.get_width()
+        ax.text(width + 0.2, bar.get_y() + bar.get_height()/2, 
+                f'{percentage:.1f}%',
+                ha='left', va='center', 
+                fontsize=14, fontfamily='Arial', color='black', fontweight='bold')
+    
+    # Set labels and styling
+    ax.set_yticks(y_positions)
+    ax.set_yticklabels(y_labels, fontsize=14, fontfamily='Arial', fontweight='bold')
+    ax.set_xlabel('Percentage of Questions', fontsize=15, fontfamily='Arial', fontweight='bold')
+    ax.set_ylabel('Question Categories', fontsize=15, fontfamily='Arial', fontweight='bold')
+    
+    # Academic styling matching the PDF
+    # ax.spines['top'].set_visible(True)
+    # ax.spines['right'].set_visible(True)
+    ax.spines['bottom'].set_visible(True)
+    # ax.spines['left'].set_visible(True)
+    
+    # Set spine colors and width
+    for spine in ax.spines.values():
+        spine.set_color('black')
+        spine.set_linewidth(1)
+    
+    # Grid styling (light gray, only for x-axis like in PDF)
+    ax.grid(True, axis='x', color='lightgray', linestyle='-', linewidth=0.5, alpha=0.7)
+    ax.set_axisbelow(True)  # Grid behind bars
+    
+    # Set x-axis range and ticks
+    max_percentage = max(percentages)
+    ax.set_xlim(0, max_percentage * 1.15)  # Add space for labels
+    
+    # Set tick parameters for academic style
+    ax.tick_params(axis='both', which='major', labelsize=12, 
+                   width=1, length=5, direction='out', color='black')
+    ax.tick_params(axis='x', which='major', bottom=True, top=False)
+    
+    # Create manual legend (matplotlib style)
+    legend_categories = ['Binary', 'Attribute', 'Motion']
+    legend_colors = [colors[cat.lower()] for cat in legend_categories]
+    
+    # Position legend on the right side
+    legend_x = 1.02
+    legend_y = 1.0
+    legend_width = 0.12
+    legend_height = 0.15
+    
+    # Create legend patches
+    legend_patches = []
+    for color in legend_colors:
+        patch = patches.Rectangle((0, 0), 1, 1, facecolor=color, 
+                                 edgecolor='black', linewidth=0.8)
+        legend_patches.append(patch)
+    
+    # Add legend to plot
+    # legend = ax.legend(legend_patches, legend_categories, 
+    #                   loc='upper right', bbox_to_anchor=(1.02, 0.5),
+    #                   frameon=True, fancybox=False, shadow=False,
+    #                   fontsize=12, title=None)
+    legend = ax.legend(legend_patches, legend_categories, 
+                      loc='upper right',
+                      frameon=True, fancybox=False, shadow=False,
+                      fontsize=15, title=None, fontweight='bold')
+
+    # Style legend frame
+    legend.get_frame().set_linewidth(1)
+    legend.get_frame().set_edgecolor('black')
+    legend.get_frame().set_facecolor('white')
+    
+    # Set background color
+    fig.patch.set_facecolor('white')
+    ax.set_facecolor('white')
+    
+    # Adjust layout to prevent clipping
+    plt.tight_layout()
+    # plt.subplots_adjust(right=0.85)  # Make room for legend
+    
+    # Save the figure at 300 DPI
+    save_path = Path(save_path)
+    if save_path.suffix.lower() not in ['.png', '.pdf', '.svg', '.jpg', '.jpeg']:
+        save_path = save_path.with_suffix('.pdf')
+    
+    plt.savefig(save_path, dpi=300, bbox_inches='tight', 
+                facecolor='white', edgecolor='none')
+    
+    print(f"Academic bar chart saved to: {save_path}")
+    
+    # Return figure for display if needed
+    return fig
+
 def create_question_hierarchy_bars(count_per_question_type):
-    """Create a professional horizontal bar chart showing question type hierarchy"""
+    """Create a professional horizontal bar chart matching academic paper style"""
     
     fig = go.Figure()
     
-    # Professional color palette with better contrast
+    # Academic color palette matching the PDF (muted colors)
     colors = {
-        'binary': '#2196f3',
-        'attribute': '#4caf50', 
-        'motion': '#9c27b0',
+        'binary': '#d4e6f1',      # Light blue (like in PDF)
+        'attribute': '#d5f4e6',   # Light green (like in PDF) 
+        'motion': '#e8d5f4',      # Light purple (like in PDF)
     }
 
     # Calculate total for percentages
@@ -433,146 +579,151 @@ def create_question_hierarchy_bars(count_per_question_type):
     # Prepare data with better organization
     y_labels = []
     values = []
+    percentages = []
     bar_colors = []
     hover_texts = []
     
-    # Sort hierarchy categories by total count (largest first)
-    sorted_hierarchies = sorted(
-        count_per_question_type.items(), 
-        key=lambda x: sum(x[1].values()), 
-        reverse=True
-    )
+    # Sort hierarchy categories by total count (largest first) - or maintain specific order like PDF
+    # For academic papers, you might want a specific logical order instead of size-based
+    desired_order = ['binary', 'attribute', 'motion']  # Adjust as needed
     
-    for hierarchy, questions in sorted_hierarchies:
-        # Sort questions within each hierarchy by count (largest first)
-        sorted_questions = sorted(questions.items(), key=lambda x: x[1], reverse=True)
-        
-        for q_type, count in sorted_questions:
-            # Clean label formatting
-            label = f"{hierarchy.title()}: {q_type.title()}"
-            y_labels.append(label)
-            values.append(count)
-            import matplotlib.colors as mcolors
+    for hierarchy in desired_order:
+        if hierarchy in count_per_question_type:
+            questions = count_per_question_type[hierarchy]
+            # Sort questions within each hierarchy by count (largest first)
+            sorted_questions = sorted(questions.items(), key=lambda x: x[1], reverse=True)
             
-            # Convert hex to RGBA with 60% opacity
-            base_color = colors[hierarchy.lower()]
-            rgba_color = mcolors.to_rgba(base_color, alpha=0.6)
-            rgba_string = f'rgba({int(rgba_color[0]*255)},{int(rgba_color[1]*255)},{int(rgba_color[2]*255)},{rgba_color[3]})'
-            bar_colors.append(rgba_string)
-            # bar_colors.append(colors[hierarchy.lower()])
-            
-            # Rich hover text
-            percentage = (count / total) * 100
-            hover_text = f"<b>{q_type.title()}</b><br>" + \
-                        f"Category: {hierarchy.title()}<br>" + \
-                        f"Count: {count:,}<br>" + \
-                        f"Percentage: {percentage:.1f}%"
-            hover_texts.append(hover_text)
+            for q_type, count in sorted_questions:
+                # Clean label formatting matching PDF style
+                label = f"{hierarchy.title()}: {q_type.replace('_', ' ').title()}"
+                y_labels.append(label)
+                values.append(count)
+                percentage = (count / total) * 100
+                percentages.append(percentage)
+                bar_colors.append(colors[hierarchy.lower()])
+                
+                # Simple hover text
+                hover_text = f"<b>{q_type.replace('_', ' ').title()}</b><br>" + \
+                            f"Count: {count:,}<br>" + \
+                            f"Percentage: {percentage:.1f}%"
+                hover_texts.append(hover_text)
+    
+    # Reverse the order for proper top-to-bottom display (like PDF)
+    y_labels = y_labels[::-1]
+    values = values[::-1] 
+    percentages = percentages[::-1]
+    bar_colors = bar_colors[::-1]
+    hover_texts = hover_texts[::-1]
     
     # Create the bar chart
     fig.add_trace(go.Bar(
-        x=values,
+        x=percentages,
         y=y_labels,
         orientation='h',
         marker=dict(
             color=bar_colors,
-            line=dict(color='black', width=1)
+            line=dict(color='black', width=0.8)  # Black borders like PDF
         ),
-        # text=[f'{v:,}<br>({v/total*100:.1f}%)' for v in values],
-        text=[f'{v/total*100:.1f}%' for v in values],
-        # text=[f'{v:,}' for v in values],
-
-        textposition='auto',
-        textfont=dict(size=20, color='black', family='Arial Black'),
+        # Percentage labels positioned like in PDF
+        text=[f'{p:.1f}%' for p in percentages],
+        textposition='outside',  # Position like in PDF
+        textfont=dict(size=11, color='black', family='Arial, sans-serif'),
         hovertemplate='%{customdata}<extra></extra>',
         customdata=hover_texts,
-        name=""  # Remove legend
+        showlegend=False
     ))
     
-    # Professional styling
+    # Academic styling matching the PDF
     fig.update_layout(
-        # title=dict(
-        #     text="<b>Question Distribution by Type and Category</b>",
-        #     font=dict(size=24, color='#1f2937', family='Inter'),
-        #     x=0.5,
-        #     xanchor='center',
-        #     pad=dict(t=20, b=20)
-        # ),
+        # Clean academic background
+        paper_bgcolor='white',
+        plot_bgcolor='white',
         
-        # Clean background
-        paper_bgcolor='#ffffff',
-        plot_bgcolor='#ffffff',
+        # Academic dimensions
+        height=max(400, len(y_labels) * 30 + 100),
+        width=800,  # Standard academic figure width
         
-        # Responsive sizing
-        height=max(400, len(y_labels) * 35 + 150),  # Dynamic height based on data
-        width=1200,
+        # Academic margins
+        margin=dict(t=30, b=80, l=250, r=80),  # Space for labels and legend
         
-        # Professional margins
-        margin=dict(t=40, b=40, l=80, r=40),
+        # Academic typography
+        font=dict(size=12, color='black', family='Arial, sans-serif'),
         
-        # Typography
-        font=dict(size=18, color='#374151', family='Arial Black'),
-        
-        # X-axis styling
+        # X-axis styling (matching PDF)
         xaxis=dict(
             title=dict(
-                text="<b>Number of Questions</b>",
-                font=dict(size=20, color='#1f2937')
+                text="Percentage of Questions",
+                font=dict(size=14, family='Arial, sans-serif')
             ),
             showgrid=True,
-            gridcolor='rgba(229, 231, 235, 0.8)',
-            gridwidth=1,
+            gridcolor='lightgray',
+            gridwidth=0.5,
             showline=True,
-            linecolor='#d1d5db',
+            linecolor='black',
             linewidth=1,
-            tickfont=dict(size=16, color='#6b7280'),
-            tickformat=',',
-            zeroline=False
+            mirror=True,
+            ticks='outside',
+            tickwidth=1,
+            ticklen=5,
+            tickfont=dict(size=12, family='Arial, sans-serif'),
+            range=[0, max(percentages) * 1.1],  # Adjust range based on data
+            dtick=2.5  # Tick intervals like in PDF
         ),
         
-        # Y-axis styling
+        # Y-axis styling (matching PDF)
         yaxis=dict(
             title=dict(
-                text="<b>Question Categories</b>",
-                font=dict(size=20, color='#1f2937')
+                text="Question Categories",
+                font=dict(size=14, family='Arial, sans-serif')
             ),
             showgrid=False,
             showline=True,
-            linecolor='#d1d5db',
+            linecolor='black',
             linewidth=1,
-            tickfont=dict(size=18, color='#374151'),
-            categoryorder='trace'  # Maintain our custom order
+            mirror=True,
+            ticks='outside',
+            tickwidth=1,
+            ticklen=5,
+            tickfont=dict(size=12, family='Arial, sans-serif'),
+            categoryorder='array',
+            categoryarray=y_labels
         ),
         
-        # Remove legend since colors are self-explanatory
-        showlegend=False,
-        
-        # Add subtle shadow effect
-        # annotations=[
-        #     dict(
-        #         text=f"<i>Total Questions: {total:,}</i>",
-        #         xref="paper", yref="paper",
-        #         x=1, y=-0.12,
-        #         xanchor='right', yanchor='top',
-        #         font=dict(size=11, color='#6b7280'),
-        #         showarrow=False
-        #     )
-        # ]
+        # Remove default legend
+        showlegend=False
     )
     
-    # Add category color legend as text annotations
-    legend_y = 1.02
-    legend_x_start = 0.1
+    # Add custom legend matching PDF style (positioned on the right)
+    legend_categories = ['Binary', 'Attribute', 'Motion']
+    legend_colors = [colors[cat.lower()] for cat in legend_categories]
     
-    for i, (category, color) in enumerate(colors.items()):
-        fig.add_annotation(
-            text=f"<span style='color:{color}'>●</span> <b>{category.title()}</b>",
-            xref="paper", yref="paper",
-            x=legend_x_start + (i * 0.25), y=legend_y,
-            xanchor='left', yanchor='bottom',
-            font=dict(size=20, color='#374151'),
-            showarrow=False
+    # Add invisible traces for clean legend
+    for cat, color in zip(legend_categories, legend_colors):
+        fig.add_trace(go.Bar(
+            x=[None], y=[None],
+            marker=dict(
+                color=color,
+                line=dict(color='black', width=0.8)
+            ),
+            name=cat,
+            showlegend=True
+        ))
+    
+    # Style the legend to match PDF
+    fig.update_layout(
+        legend=dict(
+            orientation="v",
+            yanchor="top",
+            y=1.0,
+            xanchor="right",
+            x=1.02,
+            font=dict(size=12, family='Arial, sans-serif'),
+            bgcolor="white",
+            bordercolor="black",
+            borderwidth=1,
+            itemsizing="constant"
         )
+    )
     
     return fig
 
@@ -1243,6 +1394,8 @@ def calculate_metrics(ds: VQADataset):
         format="pdf",  # PDF is preferred for LaTeX
     )
     
+    create_question_hierarchy_bars_mpl(count_per_question_type, f'figures/create_question_hierarchy_bars_{ds.tag}_mpl.pdf')
+
     fig = create_grouped_bars(count_per_question_type)
     fig.write_image(
         f'figures/create_grouped_bars_{ds.tag}.pdf',
